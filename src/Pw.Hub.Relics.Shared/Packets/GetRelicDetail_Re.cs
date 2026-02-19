@@ -5,7 +5,9 @@ public class GetRelicDetail_Re : BasePacket
     public int retcode = -1;
     public List<PRelicShopSellEntry> lots = [];
 
-    public GetRelicDetail_Re() : base(type: 6320) { }
+    public GetRelicDetail_Re() : base(type: 6320)
+    {
+    }
 
     public override PacketStream Write(PacketStream stream)
     {

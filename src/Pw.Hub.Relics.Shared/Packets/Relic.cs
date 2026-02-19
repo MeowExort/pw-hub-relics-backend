@@ -9,7 +9,9 @@ public class Relic : IMarshalData
     public sbyte reserve = -1;
     public List<RelicAddon> addons = [];
 
-    public Relic() { }
+    public Relic()
+    {
+    }
 
     public DataStream Read(DataStream stream)
     {

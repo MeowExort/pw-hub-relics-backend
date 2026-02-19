@@ -7,7 +7,9 @@ public class PRelicShopLot : IMarshalData
     public int pos_in_shop = -1;
     // end of int64_t sell_id;
 
-    public PRelicShopLot() { }
+    public PRelicShopLot()
+    {
+    }
 
     public DataStream Read(DataStream stream)
     {

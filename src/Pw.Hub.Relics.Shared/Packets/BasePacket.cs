@@ -1,24 +1,34 @@
 namespace Pw.Hub.Relics.Shared.Packets;
 
-public abstract class BasePacket
+public class BasePacket : IGamePacket
 {
-    public int Type { get; }
+    private int p_Type { get; set; }
+    private int p_Size { get; set; }
 
-    protected BasePacket(int type)
+    public int Opcode { get => p_Type; }
+    public int Length { get => p_Size; }
+
+    public BasePacket() { }
+    public BasePacket(int type, int size = 0)
     {
-        Type = type;
+        p_Type = type;
+        p_Size = size;
     }
 
-    public abstract PacketStream Write(PacketStream stream);
-    public abstract PacketStream Read(PacketStream stream);
+    public void SetType(int type) { p_Type = type; }
+    public void SetSize(int size) { p_Size = size; }
 
-    public virtual int PriorPolicy()
+    public virtual PacketStream Write(PacketStream stream)
     {
-        return 0;
+        return stream;
     }
 
-    public virtual bool SizePolicy(int size)
+    public virtual PacketStream Read(PacketStream stream)
     {
-        return true;
+        return stream;
     }
+
+    public virtual int PriorPolicy() { return 0; }
+    public virtual bool SizePolicy(int size) { return false; }
+    public virtual bool SizePolicy() { return SizePolicy(p_Size); }
 }

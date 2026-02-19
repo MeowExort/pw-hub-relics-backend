@@ -7,7 +7,9 @@ public class PRelicShopSellEntry : IMarshalData
     public uint price = 0;
     public Relic relic_item = new();
 
-    public PRelicShopSellEntry() { }
+    public PRelicShopSellEntry()
+    {
+    }
 
     public DataStream Read(DataStream stream)
     {
