@@ -26,8 +26,4 @@
     <ProjectReference Include="..\Pw.Hub.Relics.Infrastructure\Pw.Hub.Relics.Infrastructure.csproj" />
   </ItemGroup>
 
-  <ItemGroup>
-    <Folder Include="Features\Relics\ParseRelic\" />
-  </ItemGroup>
-
 </Project>

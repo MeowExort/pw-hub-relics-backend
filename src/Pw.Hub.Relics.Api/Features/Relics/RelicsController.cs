@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Pw.Hub.Relics.Api.Features.Relics.CreateRelic;
 using Pw.Hub.Relics.Api.Features.Relics.GetRelicById;
+using Pw.Hub.Relics.Api.Features.Relics.ParseRelic;
 using Pw.Hub.Relics.Api.Features.Relics.SearchRelics;
 
 namespace Pw.Hub.Relics.Api.Features.Relics;
@@ -76,6 +77,23 @@ public class RelicsController : ControllerBase
             return NotFound();
         }
         
+        return Ok(result);
+    }
+
+    /// <summary>
+    /// Парсинг бинарных данных лотов реликвий (Bot API)
+    /// </summary>
+    /// <remarks>
+    /// Принимает бинарные данные пакета GetRelicDetail_Re и сохраняет лоты в БД.
+    /// Требуется scope: relics:write
+    /// </remarks>
+    [HttpPost("parse")]
+    [Authorize(Policy = "BotPolicy")]
+    public async Task<IActionResult> ParseRelic(
+        [FromBody] ParseRelicCommand command,
+        CancellationToken cancellationToken)
+    {
+        var result = await _mediator.Send(command, cancellationToken);
         return Ok(result);
     }
 }
