@@ -50,6 +50,7 @@ public class ParseRelicHandler : IRequestHandler<ParseRelicCommand, ParseRelicRe
 
         var createdCount = 0;
         var updatedCount = 0;
+        var newListings = new List<RelicListing>();
 
         try
         {
@@ -148,14 +149,19 @@ public class ParseRelicHandler : IRequestHandler<ParseRelicCommand, ParseRelicRe
                     // Загрузить RelicDefinition для уведомлений
                     newListing.RelicDefinition = relicDefinition;
 
-                    // Обработать уведомления для нового лота (fire and forget)
-                    _ = _notificationProcessor.ProcessNewListingAsync(newListing, CancellationToken.None);
-
+                    newListings.Add(newListing);
                     createdCount++;
                 }
             }
 
             await _dbContext.SaveChangesAsync(cancellationToken);
+
+            // Обработать уведомления для новых лотов (fire and forget)
+            foreach (var newListing in newListings)
+            {
+                _ = _notificationProcessor.ProcessNewListingAsync(newListing, CancellationToken.None);
+            }
+
             return new ParseRelicResult(createdCount, updatedCount, $"Successfully processed {packet.lots.Count} lots. Created: {createdCount}, Updated: {updatedCount}.");
         }
         catch (Exception ex)
