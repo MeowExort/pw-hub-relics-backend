@@ -54,6 +54,22 @@ public class ParseRelicHandler : IRequestHandler<ParseRelicCommand, ParseRelicRe
 
         try
         {
+            // Собрать все уникальные ID атрибутов из пакета
+            var allAttributeIds = packet.lots
+                .SelectMany(lot =>
+                {
+                    var ids = new List<int>();
+                    if (lot.relic_item.main_addon >= 0)
+                        ids.Add(lot.relic_item.main_addon);
+                    ids.AddRange(lot.relic_item.addons.Select(a => a.id));
+                    return ids;
+                })
+                .Distinct()
+                .ToList();
+
+            // Убедиться, что все AttributeDefinition существуют
+            await EnsureAttributeDefinitionsExistAsync(allAttributeIds, cancellationToken);
+
             foreach (var lot in packet.lots)
             {
                 // Найти RelicDefinition по relic_item.id
@@ -202,5 +218,34 @@ public class ParseRelicHandler : IRequestHandler<ParseRelicCommand, ParseRelicRe
         }
 
         return attributes;
+    }
+
+    private async Task EnsureAttributeDefinitionsExistAsync(List<int> attributeIds, CancellationToken cancellationToken)
+    {
+        if (attributeIds.Count == 0)
+            return;
+
+        var existingIds = await _dbContext.AttributeDefinitions
+            .Where(ad => attributeIds.Contains(ad.Id))
+            .Select(ad => ad.Id)
+            .ToListAsync(cancellationToken);
+
+        var missingIds = attributeIds.Except(existingIds).ToList();
+
+        if (missingIds.Count > 0)
+        {
+            //foreach (var id in missingIds)
+            //{
+            //    _dbContext.AttributeDefinitions.Add(new AttributeDefinition
+            //    {
+            //        Id = id,
+            //        Name = $"Attribute_{id}"
+            //    });
+            //}
+
+            //await _dbContext.SaveChangesAsync(cancellationToken);
+            _logger.LogInformation("[ParseRelic] Created {Count} missing AttributeDefinitions: {Ids}", 
+                missingIds.Count, string.Join(", ", missingIds));
+        }
     }
 }
