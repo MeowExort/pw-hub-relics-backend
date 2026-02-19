@@ -1,0 +1,155 @@
+using MediatR;
+using Microsoft.EntityFrameworkCore;
+using Pw.Hub.Relics.Domain.Enums;
+using Pw.Hub.Relics.Infrastructure.Data;
+using Pw.Hub.Relics.Shared.Helpers;
+
+namespace Pw.Hub.Relics.Api.Features.Relics.SearchRelics;
+
+public class SearchRelicsHandler : IRequestHandler<SearchRelicsQuery, SearchRelicsResponse>
+{
+    private readonly RelicsDbContext _dbContext;
+
+    public SearchRelicsHandler(RelicsDbContext dbContext)
+    {
+        _dbContext = dbContext;
+    }
+
+    public async Task<SearchRelicsResponse> Handle(SearchRelicsQuery request, CancellationToken cancellationToken)
+    {
+        // Ограничение размера страницы
+        var pageSize = Math.Min(request.PageSize, 100);
+        var pageNumber = Math.Max(request.PageNumber, 1);
+
+        var query = _dbContext.RelicListings
+            .Include(r => r.RelicDefinition)
+                .ThenInclude(rd => rd.SlotType)
+            .Include(r => r.Server)
+            .Include(r => r.Attributes)
+                .ThenInclude(a => a.AttributeDefinition)
+            .Where(r => r.IsActive)
+            .AsQueryable();
+
+        // Применение фильтров
+        if (request.SoulType.HasValue)
+        {
+            var soulType = (SoulType)request.SoulType.Value;
+            query = query.Where(r => r.RelicDefinition.SoulType == soulType);
+        }
+
+        if (request.SlotTypeId.HasValue)
+        {
+            query = query.Where(r => r.RelicDefinition.SlotTypeId == request.SlotTypeId.Value);
+        }
+
+        if (request.Race.HasValue)
+        {
+            var race = (Race)request.Race.Value;
+            query = query.Where(r => r.RelicDefinition.Race == race);
+        }
+
+        if (request.SoulLevel.HasValue)
+        {
+            query = query.Where(r => r.RelicDefinition.SoulLevel == request.SoulLevel.Value);
+        }
+
+        if (request.MainAttributeId.HasValue)
+        {
+            query = query.Where(r => r.Attributes.Any(a => 
+                a.Category == AttributeCategory.Main && 
+                a.AttributeDefinitionId == request.MainAttributeId.Value));
+        }
+
+        if (request.AdditionalAttributeIds is { Length: > 0 })
+        {
+            foreach (var attrId in request.AdditionalAttributeIds)
+            {
+                query = query.Where(r => r.Attributes.Any(a => 
+                    a.Category == AttributeCategory.Additional && 
+                    a.AttributeDefinitionId == attrId));
+            }
+        }
+
+        if (request.MinPrice.HasValue)
+        {
+            query = query.Where(r => r.Price >= request.MinPrice.Value);
+        }
+
+        if (request.MaxPrice.HasValue)
+        {
+            query = query.Where(r => r.Price <= request.MaxPrice.Value);
+        }
+
+        if (request.ServerId.HasValue)
+        {
+            query = query.Where(r => r.ServerId == request.ServerId.Value);
+        }
+
+        // Подсчет общего количества
+        var totalCount = await query.CountAsync(cancellationToken);
+
+        // Пагинация и сортировка
+        var items = await query
+            .OrderByDescending(r => r.CreatedAt)
+            .Skip((pageNumber - 1) * pageSize)
+            .Take(pageSize)
+            .ToListAsync(cancellationToken);
+
+        // Маппинг в DTO
+        var itemDtos = items.Select(r =>
+        {
+            var mainAttr = r.Attributes.FirstOrDefault(a => a.Category == AttributeCategory.Main);
+            var additionalAttrs = r.Attributes.Where(a => a.Category == AttributeCategory.Additional).ToList();
+
+            return new RelicListingDto
+            {
+                Id = r.Id,
+                RelicDefinition = new RelicDefinitionDto
+                {
+                    Id = r.RelicDefinition.Id,
+                    Name = r.RelicDefinition.Name,
+                    SoulLevel = r.RelicDefinition.SoulLevel,
+                    SoulType = (int)r.RelicDefinition.SoulType,
+                    SlotType = new SlotTypeDto(r.RelicDefinition.SlotType.Id, r.RelicDefinition.SlotType.Name),
+                    Race = (int)r.RelicDefinition.Race,
+                    IconUri = r.RelicDefinition.IconUri
+                },
+                AbsorbExperience = r.AbsorbExperience,
+                MainAttribute = mainAttr != null
+                    ? new RelicAttributeDto
+                    {
+                        AttributeDefinition = new AttributeDefinitionDto(
+                            mainAttr.AttributeDefinition.Id,
+                            mainAttr.AttributeDefinition.Name),
+                        Value = mainAttr.Value
+                    }
+                    : new RelicAttributeDto
+                    {
+                        AttributeDefinition = new AttributeDefinitionDto(0, "Unknown"),
+                        Value = 0
+                    },
+                AdditionalAttributes = additionalAttrs.Select(a => new RelicAttributeDto
+                {
+                    AttributeDefinition = new AttributeDefinitionDto(
+                        a.AttributeDefinition.Id,
+                        a.AttributeDefinition.Name),
+                    Value = a.Value
+                }).ToList(),
+                EnhancementLevel = r.EnhancementLevel,
+                Price = r.Price,
+                PriceFormatted = PriceHelper.FormatPrice(r.Price),
+                Server = new ServerDto(r.Server.Id, r.Server.Name, r.Server.Key),
+                CreatedAt = r.CreatedAt
+            };
+        }).ToList();
+
+        return new SearchRelicsResponse
+        {
+            Items = itemDtos,
+            TotalCount = totalCount,
+            PageNumber = pageNumber,
+            PageSize = pageSize,
+            TotalPages = (int)Math.Ceiling((double)totalCount / pageSize)
+        };
+    }
+}
