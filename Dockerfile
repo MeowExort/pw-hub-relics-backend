@@ -22,15 +22,8 @@ RUN dotnet publish src/Pw.Hub.Relics.Api/Pw.Hub.Relics.Api.csproj -c Release -o 
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
 WORKDIR /app
 
-# Create non-root user for security
-RUN adduser --disabled-password --gecos "" appuser
-
 # Copy published app
 COPY --from=build /app/publish .
-
-# Change ownership and switch to non-root user
-RUN chown -R appuser:appuser /app
-USER appuser
 
 # Expose port
 EXPOSE 8080
