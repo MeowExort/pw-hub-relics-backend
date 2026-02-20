@@ -63,6 +63,10 @@ public class RelicListingConfiguration : IEntityTypeConfiguration<RelicListing>
         builder.Property(x => x.SoldAt)
             .HasColumnName("sold_at");
 
+        builder.Property(x => x.AttributesHash)
+            .HasColumnName("attributes_hash")
+            .HasMaxLength(64);
+
         // Relationships
         builder.HasOne(x => x.RelicDefinition)
             .WithMany()
@@ -91,5 +95,9 @@ public class RelicListingConfiguration : IEntityTypeConfiguration<RelicListing>
         builder.HasIndex(x => x.ServerId);
         builder.HasIndex(x => x.Price);
         builder.HasIndex(x => x.CreatedAt).IsDescending();
+        
+        // Index for optimized lookup by attributes hash
+        builder.HasIndex(x => new { x.ServerId, x.SellerCharacterId, x.ShopPosition, x.AttributesHash })
+            .HasDatabaseName("IX_RelicListings_Lookup");
     }
 }

@@ -27,10 +27,17 @@ if (!string.IsNullOrEmpty(telegramBotToken))
     builder.Services.AddSingleton<ITelegramBotClient>(new TelegramBotClient(telegramBotToken));
 }
 
+// Caching
+builder.Services.AddMemoryCache();
+
 // Background Jobs
 builder.Services.AddHostedService<DeactivateExpiredListingsJob>();
 builder.Services.AddHostedService<RefreshPriceHistoryJob>();
 builder.Services.AddSingleton<INotificationProcessor, NotificationProcessorService>();
+
+// Notification Queue (для оптимизированной обработки уведомлений)
+builder.Services.AddSingleton<INotificationQueue, NotificationQueue>();
+builder.Services.AddHostedService<NotificationBackgroundService>();
 
 // Authentication (OpenID Connect / JWT Bearer)
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)

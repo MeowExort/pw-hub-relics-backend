@@ -1,6 +1,8 @@
 using MediatR;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Memory;
 using Pw.Hub.Relics.Api.BackgroundJobs;
+using Pw.Hub.Relics.Api.Helpers;
 using Pw.Hub.Relics.Domain.Entities;
 using Pw.Hub.Relics.Domain.Enums;
 using Pw.Hub.Relics.Infrastructure.Data;
@@ -14,16 +16,19 @@ public class ParseRelicHandler : IRequestHandler<ParseRelicCommand, ParseRelicRe
 {
     private readonly RelicsDbContext _dbContext;
     private readonly ILogger<ParseRelicHandler> _logger;
-    private readonly INotificationProcessor _notificationProcessor;
+    private readonly INotificationQueue _notificationQueue;
+    private readonly IMemoryCache _cache;
 
     public ParseRelicHandler(
-        RelicsDbContext dbContext, 
+        RelicsDbContext dbContext,
         ILogger<ParseRelicHandler> logger,
-        INotificationProcessor notificationProcessor)
+        INotificationQueue notificationQueue,
+        IMemoryCache cache)
     {
         _dbContext = dbContext;
         _logger = logger;
-        _notificationProcessor = notificationProcessor;
+        _notificationQueue = notificationQueue;
+        _cache = cache;
     }
 
     public async Task<ParseRelicResult> Handle(ParseRelicCommand request, CancellationToken cancellationToken)
@@ -35,143 +40,179 @@ public class ParseRelicHandler : IRequestHandler<ParseRelicCommand, ParseRelicRe
 
         if (packet.lots is null || packet.lots.Count == 0)
         {
-            _logger.LogWarning("[ParseRelic] Lots can't be null or empty.");
             return new ParseRelicResult(0, 0, "Lots can't be null or empty.");
         }
 
-        _logger.LogInformation("[ParseRelic] Received {Count} lots.", packet.lots.Count);
-
-        var server = await _dbContext.ServerDefinitions
-            .FirstOrDefaultAsync(s => s.Key.ToLower() == request.Server.ToLower(), cancellationToken);
-
+        // Задача 2: Кэширование сервера
+        var server = await GetServerAsync(request.Server, cancellationToken);
         if (server == null)
         {
-            _logger.LogWarning("[ParseRelic] Server '{Server}' not found.", request.Server);
             return new ParseRelicResult(0, 0, $"Server '{request.Server}' not found.");
         }
 
+        // Задача 1: Batch-загрузка RelicDefinitions
+        var relicIds = packet.lots.Select(l => l.relic_item.id).Distinct().ToList();
+        var definitions = await GetRelicDefinitionsAsync(relicIds, cancellationToken);
+
+        // Задача 1: Batch-загрузка существующих листингов
+        var sellerIds = packet.lots.Select(l => (long)l.sell_id.player_id).Distinct().ToList();
+        var existingListings = await _dbContext.RelicListings
+            .Include(rl => rl.Attributes)
+            .Where(rl => rl.ServerId == server.Id && sellerIds.Contains(rl.SellerCharacterId))
+            .ToListAsync(cancellationToken);
+
+        var listingsLookup = existingListings
+            .GroupBy(rl => (rl.SellerCharacterId, rl.ShopPosition))
+            .ToDictionary(g => g.Key, g => g.ToList());
+
+        // Задача 7: Счётчики для итогового логирования
         var createdCount = 0;
         var updatedCount = 0;
+        var skippedCount = 0;
         var newListings = new List<RelicListing>();
+        var skippedRelicIds = new List<int>();
 
-        try
+        foreach (var lot in packet.lots)
         {
-            foreach (var lot in packet.lots)
+            if (!definitions.TryGetValue(lot.relic_item.id, out var relicDefinition))
             {
-                // Найти RelicDefinition по relic_item.id
-                var relicDefinition = await _dbContext.RelicDefinitions
-                    .FirstOrDefaultAsync(rd => rd.Id == lot.relic_item.id, cancellationToken);
-
-                if (relicDefinition == null)
-                {
-                    _logger.LogWarning("[ParseRelic] RelicDefinition not found for id={RelicId}.", lot.relic_item.id);
-                    continue;
-                }
-
-                // Найти существующий лот по уникальному ключу, включая атрибуты и заточку
-                var candidateListings = await _dbContext.RelicListings
-                    .Include(rl => rl.Attributes)
-                    .Where(rl =>
-                        rl.SellerCharacterId == lot.sell_id.player_id &&
-                        rl.ShopPosition == lot.sell_id.pos_in_shop &&
-                        rl.ServerId == server.Id &&
-                        rl.RelicDefinitionId == relicDefinition.Id &&
-                        rl.EnhancementLevel == lot.relic_item.reserve)
-                    .ToListAsync(cancellationToken);
-
-                // Фильтрация по атрибутам (основной + дополнительные)
-                var existingListing = candidateListings.FirstOrDefault(rl =>
-                {
-                    // Проверка основного атрибута
-                    var mainAttr = rl.Attributes.FirstOrDefault(a => a.Category == AttributeCategory.Main);
-                    if (lot.relic_item.main_addon >= 0)
-                    {
-                        var mainAddonAttribute = AddonMapping.GetRelicAttributeType(lot.relic_item.main_addon)!.Value;
-                        if (mainAttr == null || mainAttr.AttributeDefinitionId != mainAddonAttribute)
-                            return false;
-                    }
-                    else if (mainAttr != null)
-                    {
-                        return false;
-                    }
-
-                    // Проверка дополнительных атрибутов
-                    var additionalAttrs = rl.Attributes
-                        .Where(a => a.Category == AttributeCategory.Additional)
-                        .Select(a => (a.AttributeDefinitionId, a.Value))
-                        .OrderBy(a => a.AttributeDefinitionId)
-                        .ThenBy(a => a.Value)
-                        .ToList();
-
-                    var incomingAttrs = lot.relic_item.addons
-                        .Select(a => (AttributeDefinitionId: (AddonMapping.GetRelicAttributeType(a.Id) ?? 0), a.Value))
-                        .OrderBy(a => a.AttributeDefinitionId)
-                        .ThenBy(a => a.Value)
-                        .ToList();
-
-                    return additionalAttrs.SequenceEqual(incomingAttrs);
-                });
-
-                if (existingListing != null)
-                {
-                    // Обновить существующий лот
-                    existingListing.LastSeenAt = DateTime.UtcNow;
-                    existingListing.IsActive = true;
-                    existingListing.AbsorbExperience = lot.relic_item.exp;
-                    existingListing.EnhancementLevel = lot.relic_item.reserve;
-                    existingListing.Price = lot.price;
-
-                    // Обновить атрибуты
-                    _dbContext.RelicAttributes.RemoveRange(existingListing.Attributes);
-                    existingListing.Attributes = CreateAttributes(lot.relic_item, existingListing.Id);
-
-                    updatedCount++;
-                }
-                else
-                {
-                    // Создать новый лот
-                    var newListing = new RelicListing
-                    {
-                        Id = Guid.NewGuid(),
-                        RelicDefinitionId = relicDefinition.Id,
-                        AbsorbExperience = lot.relic_item.exp,
-                        EnhancementLevel = lot.relic_item.reserve,
-                        SellerCharacterId = lot.sell_id.player_id,
-                        ShopPosition = lot.sell_id.pos_in_shop,
-                        Price = lot.price,
-                        ServerId = server.Id,
-                        CreatedAt = DateTime.UtcNow,
-                        LastSeenAt = DateTime.UtcNow,
-                        IsActive = true
-                    };
-
-                    newListing.Attributes = CreateAttributes(lot.relic_item, newListing.Id);
-
-                    _dbContext.RelicListings.Add(newListing);
-
-                    // Загрузить RelicDefinition для уведомлений
-                    newListing.RelicDefinition = relicDefinition;
-
-                    newListings.Add(newListing);
-                    createdCount++;
-                }
+                skippedCount++;
+                skippedRelicIds.Add(lot.relic_item.id);
+                continue;
             }
 
-            await _dbContext.SaveChangesAsync(cancellationToken);
+            var key = (lot.sell_id.player_id, lot.sell_id.pos_in_shop);
+            
+            // Задача 3: Вычисление хеша атрибутов
+            var incomingHash = AttributeHashHelper.ComputeHashFromRelic(lot.relic_item);
 
-            // Обработать уведомления для новых лотов (fire and forget)
-            foreach (var newListing in newListings)
+            // Задача 3: Поиск по хешу атрибутов в локальном словаре
+            RelicListing? existingListing = null;
+            if (listingsLookup.TryGetValue(key, out var candidates))
             {
-                _ = _notificationProcessor.ProcessNewListingAsync(newListing, CancellationToken.None);
+                existingListing = candidates.FirstOrDefault(rl =>
+                    rl.RelicDefinitionId == relicDefinition.Id &&
+                    rl.EnhancementLevel == lot.relic_item.reserve &&
+                    rl.AttributesHash == incomingHash);
             }
 
-            return new ParseRelicResult(createdCount, updatedCount, $"Successfully processed {packet.lots.Count} lots. Created: {createdCount}, Updated: {updatedCount}.");
+            if (existingListing != null)
+            {
+                // Задача 4: Умное обновление - только изменившиеся поля
+                existingListing.LastSeenAt = DateTime.UtcNow;
+                existingListing.IsActive = true;
+                existingListing.AbsorbExperience = lot.relic_item.exp;
+                existingListing.Price = lot.price;
+                // Атрибуты не обновляем, т.к. хеш совпал
+                updatedCount++;
+            }
+            else
+            {
+                // Создать новый лот
+                var newListing = new RelicListing
+                {
+                    Id = Guid.NewGuid(),
+                    RelicDefinitionId = relicDefinition.Id,
+                    AbsorbExperience = lot.relic_item.exp,
+                    EnhancementLevel = lot.relic_item.reserve,
+                    SellerCharacterId = lot.sell_id.player_id,
+                    ShopPosition = lot.sell_id.pos_in_shop,
+                    Price = lot.price,
+                    ServerId = server.Id,
+                    CreatedAt = DateTime.UtcNow,
+                    LastSeenAt = DateTime.UtcNow,
+                    IsActive = true,
+                    AttributesHash = incomingHash
+                };
+
+                newListing.Attributes = CreateAttributes(lot.relic_item, newListing.Id);
+                newListing.RelicDefinition = relicDefinition;
+
+                _dbContext.RelicListings.Add(newListing);
+                newListings.Add(newListing);
+                createdCount++;
+            }
         }
-        catch (Exception ex)
+
+        await _dbContext.SaveChangesAsync(cancellationToken);
+
+        // Задача 6: Пакетная отправка уведомлений в очередь
+        if (newListings.Count > 0)
         {
-            _logger.LogError(ex, "[ParseRelic] Error processing lots.");
-            throw;
+            await _notificationQueue.EnqueueAsync(newListings, cancellationToken);
         }
+
+        // Задача 7: Итоговое логирование
+        _logger.LogInformation(
+            "[ParseRelic] Processed {Total} lots. Created: {Created}, Updated: {Updated}, Skipped: {Skipped}",
+            packet.lots.Count, createdCount, updatedCount, skippedCount);
+
+        if (skippedRelicIds.Count > 0)
+        {
+            _logger.LogWarning(
+                "[ParseRelic] Skipped lots due to missing definitions: {Ids}",
+                string.Join(", ", skippedRelicIds.Distinct().Take(10)));
+        }
+
+        return new ParseRelicResult(createdCount, updatedCount,
+            $"Successfully processed {packet.lots.Count} lots.");
+    }
+
+    /// <summary>
+    /// Задача 2: Кэширование ServerDefinitions (TTL 5 мин)
+    /// </summary>
+    private async Task<ServerDefinition?> GetServerAsync(string serverKey, CancellationToken ct)
+    {
+        var cacheKey = $"server:{serverKey.ToLower()}";
+        
+        return await _cache.GetOrCreateAsync(cacheKey, async entry =>
+        {
+            entry.AbsoluteExpirationRelativeToNow = TimeSpan.FromHours(24);
+            // Задача 5: AsNoTracking для read-only запросов
+            return await _dbContext.ServerDefinitions
+                .AsNoTracking()
+                .FirstOrDefaultAsync(s => s.Key.ToLower() == serverKey.ToLower(), ct);
+        });
+    }
+
+    /// <summary>
+    /// Задача 2: Кэширование RelicDefinitions (TTL 10 мин)
+    /// </summary>
+    private async Task<Dictionary<int, RelicDefinition>> GetRelicDefinitionsAsync(
+        List<int> relicIds, CancellationToken ct)
+    {
+        var result = new Dictionary<int, RelicDefinition>();
+        var missingIds = new List<int>();
+
+        foreach (var id in relicIds.Distinct())
+        {
+            var cacheKey = $"relic_def:{id}";
+            if (_cache.TryGetValue(cacheKey, out RelicDefinition? cached) && cached != null)
+            {
+                result[id] = cached;
+            }
+            else
+            {
+                missingIds.Add(id);
+            }
+        }
+
+        if (missingIds.Count > 0)
+        {
+            // Задача 5: AsNoTracking для read-only запросов
+            var fromDb = await _dbContext.RelicDefinitions
+                .Where(rd => missingIds.Contains(rd.Id))
+                .AsNoTracking()
+                .ToListAsync(ct);
+
+            foreach (var def in fromDb)
+            {
+                _cache.Set($"relic_def:{def.Id}", def, TimeSpan.FromMinutes(120));
+                result[def.Id] = def;
+            }
+        }
+
+        return result;
     }
 
     private static List<RelicAttribute> CreateAttributes(Relic relic, Guid listingId)

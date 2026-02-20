@@ -47,4 +47,9 @@ public class RelicListing
     public DateTime LastSeenAt { get; set; }
     public bool IsActive { get; set; }
     public DateTime? SoldAt { get; set; }
+    
+    /// <summary>
+    /// SHA256 хеш атрибутов для быстрого поиска
+    /// </summary>
+    public string? AttributesHash { get; set; }
 }
