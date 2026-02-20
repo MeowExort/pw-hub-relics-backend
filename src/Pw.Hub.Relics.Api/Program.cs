@@ -39,6 +39,9 @@ builder.Services.AddSingleton<INotificationProcessor, NotificationProcessorServi
 builder.Services.AddSingleton<INotificationQueue, NotificationQueue>();
 builder.Services.AddHostedService<NotificationBackgroundService>();
 
+// Backfill job для заполнения AttributesHash у существующих записей
+builder.Services.AddHostedService<BackfillAttributesHashJob>();
+
 // Authentication (OpenID Connect / JWT Bearer)
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
