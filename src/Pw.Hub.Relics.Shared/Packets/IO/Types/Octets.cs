@@ -1,6 +1,6 @@
 ﻿using System.Text;
 
-namespace Pw.Hub.Relics.Shared.Packets.Types;
+namespace Pw.Hub.Relics.Shared.Packets.IO.Types;
 
 public class Octets
 {
@@ -57,7 +57,7 @@ public class Octets
         return new Octets(data);
     }
 
-    public static explicit operator byte[](Octets data)
+    public static explicit operator byte[] (Octets data)
     {
         return data.GetBytes();
     }

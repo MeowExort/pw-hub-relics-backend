@@ -20,6 +20,14 @@ public class CreateRelicHandler : IRequestHandler<CreateRelicCommand, CreateReli
 
     public async Task<CreateRelicResult> Handle(CreateRelicCommand request, CancellationToken cancellationToken)
     {
+        // 0. Убедиться, что все AttributeDefinition существуют
+        var attributeIds = new List<int> { request.MainAttribute.AttributeDefinitionId };
+        if (request.AdditionalAttributes != null)
+        {
+            attributeIds.AddRange(request.AdditionalAttributes.Select(a => a.AttributeDefinitionId));
+        }
+        await EnsureAttributeDefinitionsExistAsync(attributeIds.Distinct().ToList(), cancellationToken);
+
         // 1. Найти RelicDefinition по параметрам
         var relicDefinition = await _dbContext.RelicDefinitions
             .FirstOrDefaultAsync(rd =>
@@ -120,5 +128,32 @@ public class CreateRelicHandler : IRequestHandler<CreateRelicCommand, CreateReli
         }
 
         return attributes;
+    }
+
+    private async Task EnsureAttributeDefinitionsExistAsync(List<int> attributeIds, CancellationToken cancellationToken)
+    {
+        if (attributeIds.Count == 0)
+            return;
+
+        var existingIds = await _dbContext.AttributeDefinitions
+            .Where(ad => attributeIds.Contains(ad.Id))
+            .Select(ad => ad.Id)
+            .ToListAsync(cancellationToken);
+
+        var missingIds = attributeIds.Except(existingIds).ToList();
+
+        if (missingIds.Count > 0)
+        {
+            foreach (var id in missingIds)
+            {
+                _dbContext.AttributeDefinitions.Add(new AttributeDefinition
+                {
+                    Id = id,
+                    Name = $"Attribute_{id}"
+                });
+            }
+
+            await _dbContext.SaveChangesAsync(cancellationToken);
+        }
     }
 }

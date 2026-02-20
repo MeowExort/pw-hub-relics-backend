@@ -15,10 +15,10 @@ builder.Services.AddDbContext<RelicsDbContext>(options =>
 
 // MediatR
 builder.Services.AddMediatR(cfg => 
-    cfg.RegisterServicesFromAssembly(typeof(Program).Assembly));
+    cfg.RegisterServicesFromAssembly(typeof(Pw.Hub.Relics.Api.Program).Assembly));
 
 // FluentValidation
-builder.Services.AddValidatorsFromAssembly(typeof(Program).Assembly);
+builder.Services.AddValidatorsFromAssembly(typeof(Pw.Hub.Relics.Api.Program).Assembly);
 
 // Telegram Bot
 var telegramBotToken = builder.Configuration["Telegram:BotToken"];
@@ -108,7 +108,7 @@ using (var scope = app.Services.CreateScope())
     }
     catch (Exception ex)
     {
-        var logger = services.GetRequiredService<ILogger<Program>>();
+        var logger = services.GetRequiredService<ILogger<Pw.Hub.Relics.Api.Program>>();
         logger.LogError(ex, "An error occurred while migrating or seeding the database");
     }
 }
@@ -128,4 +128,7 @@ app.MapControllers();
 
 app.Run();
 
-public partial class Program { }
+namespace Pw.Hub.Relics.Api
+{
+    public partial class Program { }
+}

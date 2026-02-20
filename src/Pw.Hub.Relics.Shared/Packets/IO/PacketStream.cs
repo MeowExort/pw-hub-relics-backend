@@ -1,6 +1,4 @@
-using Pw.Hub.Relics.Shared.Packets.Types;
-
-namespace Pw.Hub.Relics.Shared.Packets;
+﻿namespace Pw.Hub.Relics.Shared.Packets.IO;
 
 public class PacketStream : DataStream
 {

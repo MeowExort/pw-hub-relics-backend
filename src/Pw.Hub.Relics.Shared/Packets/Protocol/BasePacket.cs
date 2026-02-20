@@ -1,4 +1,6 @@
-namespace Pw.Hub.Relics.Shared.Packets;
+﻿using Pw.Hub.Relics.Shared.Packets.IO;
+
+namespace Pw.Hub.Relics.Shared.Packets.Protocol;
 
 public class BasePacket : IGamePacket
 {
@@ -31,4 +33,14 @@ public class BasePacket : IGamePacket
     public virtual int PriorPolicy() { return 0; }
     public virtual bool SizePolicy(int size) { return false; }
     public virtual bool SizePolicy() { return SizePolicy(p_Size); }
+
+    public virtual async Task Process(Guid sid)
+    {
+        await Task.CompletedTask;
+    }
+
+    public virtual async Task Process(string server)
+    {
+        await Task.CompletedTask;
+    }
 }

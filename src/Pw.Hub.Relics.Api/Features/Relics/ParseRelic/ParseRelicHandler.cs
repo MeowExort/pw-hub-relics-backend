@@ -4,7 +4,9 @@ using Pw.Hub.Relics.Api.BackgroundJobs;
 using Pw.Hub.Relics.Domain.Entities;
 using Pw.Hub.Relics.Domain.Enums;
 using Pw.Hub.Relics.Infrastructure.Data;
+using Pw.Hub.Relics.Shared.Helpers;
 using Pw.Hub.Relics.Shared.Packets;
+using Pw.Hub.Relics.Shared.Packets.IO;
 
 namespace Pw.Hub.Relics.Api.Features.Relics.ParseRelic;
 
@@ -26,9 +28,6 @@ public class ParseRelicHandler : IRequestHandler<ParseRelicCommand, ParseRelicRe
 
     public async Task<ParseRelicResult> Handle(ParseRelicCommand request, CancellationToken cancellationToken)
     {
-        _logger.LogInformation("[ParseRelic] Incoming data (hex): {DataHex}", Convert.ToHexString(request.Data));
-
-        return new ParseRelicResult(0, 0, "-");
         using var packetStream = new PacketStream(request.Data);
 
         var packet = new GetRelicDetail_Re();
@@ -57,22 +56,6 @@ public class ParseRelicHandler : IRequestHandler<ParseRelicCommand, ParseRelicRe
 
         try
         {
-            // Собрать все уникальные ID атрибутов из пакета
-            var allAttributeIds = packet.lots
-                .SelectMany(lot =>
-                {
-                    var ids = new List<int>();
-                    if (lot.relic_item.main_addon >= 0)
-                        ids.Add(lot.relic_item.main_addon);
-                    ids.AddRange(lot.relic_item.addons.Select(a => a.id));
-                    return ids;
-                })
-                .Distinct()
-                .ToList();
-
-            // Убедиться, что все AttributeDefinition существуют
-            await EnsureAttributeDefinitionsExistAsync(allAttributeIds, cancellationToken);
-
             foreach (var lot in packet.lots)
             {
                 // Найти RelicDefinition по relic_item.id
@@ -103,7 +86,8 @@ public class ParseRelicHandler : IRequestHandler<ParseRelicCommand, ParseRelicRe
                     var mainAttr = rl.Attributes.FirstOrDefault(a => a.Category == AttributeCategory.Main);
                     if (lot.relic_item.main_addon >= 0)
                     {
-                        if (mainAttr == null || mainAttr.AttributeDefinitionId != lot.relic_item.main_addon)
+                        var mainAddonAttribute = AddonMapping.GetRelicAttributeType(lot.relic_item.main_addon)!.Value;
+                        if (mainAttr == null || mainAttr.AttributeDefinitionId != mainAddonAttribute)
                             return false;
                     }
                     else if (mainAttr != null)
@@ -119,13 +103,13 @@ public class ParseRelicHandler : IRequestHandler<ParseRelicCommand, ParseRelicRe
                         .ThenBy(a => a.Value)
                         .ToList();
 
-                    var incomingAddons = lot.relic_item.addons
-                        .Select(a => (a.id, a.value))
-                        .OrderBy(a => a.id)
-                        .ThenBy(a => a.value)
+                    var incomingAttrs = lot.relic_item.addons
+                        .Select(a => (AttributeDefinitionId: (AddonMapping.GetRelicAttributeType(a.Id) ?? 0), a.Value))
+                        .OrderBy(a => a.AttributeDefinitionId)
+                        .ThenBy(a => a.Value)
                         .ToList();
 
-                    return additionalAttrs.SequenceEqual(incomingAddons);
+                    return additionalAttrs.SequenceEqual(incomingAttrs);
                 });
 
                 if (existingListing != null)
@@ -201,7 +185,7 @@ public class ParseRelicHandler : IRequestHandler<ParseRelicCommand, ParseRelicRe
             {
                 Id = Guid.NewGuid(),
                 RelicListingId = listingId,
-                AttributeDefinitionId = relic.main_addon,
+                AttributeDefinitionId = AddonMapping.GetRelicAttributeType(relic.main_addon) ?? 0,
                 Value = 0, // Значение основного атрибута не передаётся в пакете
                 Category = AttributeCategory.Main
             });
@@ -214,41 +198,12 @@ public class ParseRelicHandler : IRequestHandler<ParseRelicCommand, ParseRelicRe
             {
                 Id = Guid.NewGuid(),
                 RelicListingId = listingId,
-                AttributeDefinitionId = addon.id,
+                AttributeDefinitionId = AddonMapping.GetRelicAttributeType(addon.id) ?? 0,
                 Value = addon.value,
                 Category = AttributeCategory.Additional
             });
         }
 
         return attributes;
-    }
-
-    private async Task EnsureAttributeDefinitionsExistAsync(List<int> attributeIds, CancellationToken cancellationToken)
-    {
-        if (attributeIds.Count == 0)
-            return;
-
-        var existingIds = await _dbContext.AttributeDefinitions
-            .Where(ad => attributeIds.Contains(ad.Id))
-            .Select(ad => ad.Id)
-            .ToListAsync(cancellationToken);
-
-        var missingIds = attributeIds.Except(existingIds).ToList();
-
-        if (missingIds.Count > 0)
-        {
-            //foreach (var id in missingIds)
-            //{
-            //    _dbContext.AttributeDefinitions.Add(new AttributeDefinition
-            //    {
-            //        Id = id,
-            //        Name = $"Attribute_{id}"
-            //    });
-            //}
-
-            //await _dbContext.SaveChangesAsync(cancellationToken);
-            _logger.LogInformation("[ParseRelic] Created {Count} missing AttributeDefinitions: {Ids}", 
-                missingIds.Count, string.Join(", ", missingIds));
-        }
     }
 }

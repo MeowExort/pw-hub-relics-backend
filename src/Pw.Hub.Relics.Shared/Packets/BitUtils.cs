@@ -1,27 +1,19 @@
-namespace Pw.Hub.Relics.Shared.Packets.Types;
+﻿namespace Pw.Hub.Relics.Shared.Packets;
 
-public class BigEndian
-{
-}
-
-public class LittleEndian
-{
-}
+public class BigEndian { }
+public class LittleEndian { }
 
 public class BitUtils<T>
 {
     // https://referencesource.microsoft.com/#mscorlib/system/bitconverter.cs,9108fa2d0b37805b
 
     #region Params
-
     public static bool IsBig => typeof(T) == typeof(BigEndian);
     public static bool IsLittle => typeof(T) == typeof(LittleEndian);
-
     #endregion
 
 
     #region Int16
-
     public static unsafe short BytesToInt16(byte[] value, int offset = 0)
     {
         fixed (byte* pbyte = &value[offset])
@@ -58,12 +50,10 @@ public class BitUtils<T>
 
         return new byte[0];
     }
-
     #endregion
 
 
     #region Int32
-
     public static unsafe int BytesToInt32(byte[] value, int offset = 0)
     {
         fixed (byte* pbyte = &value[offset])
@@ -104,12 +94,10 @@ public class BitUtils<T>
 
         return new byte[0];
     }
-
     #endregion
 
 
     #region Int64
-
     public static unsafe long BytesToInt64(byte[] value, int offset = 0)
     {
         fixed (byte* pbyte = &value[offset])
@@ -166,12 +154,10 @@ public class BitUtils<T>
 
         return new byte[0];
     }
-
     #endregion
 
 
     #region Single
-
     public static unsafe float BytesToSingle(byte[] buffer, int offset = 0)
     {
         int result = BytesToInt32(buffer, offset);
@@ -183,12 +169,10 @@ public class BitUtils<T>
         int result = *(int*)&value;
         return Int32ToBytes(result);
     }
-
     #endregion
 
 
     #region Double
-
     public static unsafe double BytesToDouble(byte[] buffer, int offset = 0)
     {
         long result = BytesToInt64(buffer, offset);
@@ -200,6 +184,5 @@ public class BitUtils<T>
         long result = *(long*)&value;
         return Int64ToBytes(result);
     }
-
     #endregion
 }

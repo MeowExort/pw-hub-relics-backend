@@ -1,4 +1,6 @@
-namespace Pw.Hub.Relics.Shared.Packets.Types;
+﻿namespace Pw.Hub.Relics.Shared.Packets;
+
+public enum Endianness { BigEndian, LittleEndian }
 
 public class ByteOrder
 {

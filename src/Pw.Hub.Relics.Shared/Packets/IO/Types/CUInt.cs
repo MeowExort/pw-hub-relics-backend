@@ -1,11 +1,9 @@
-﻿namespace Pw.Hub.Relics.Shared.Packets.Types;
+﻿namespace Pw.Hub.Relics.Shared.Packets.IO.Types;
 
 public static class CUInt
 {
     #region compact_uint32
-
     public static Byte[] Marshal(Int32 value) => Marshal((UInt32)value);
-
     public static Byte[] Marshal(UInt32 value)
     {
         if (value < 0x80) return new Byte[] { (Byte)value };
@@ -13,28 +11,22 @@ public static class CUInt
         if (value < 0x20000000) return BitConverter.GetBytes(byteorder_32(value | 0xc0000000));
         return new Byte[] { 0xe0 }.Concat(BitConverter.GetBytes(byteorder_32(value))).ToArray();
     }
-
     #endregion
 
     #region uncompact_uint32
-
     public static bool Unmarshal(List<Byte> buffer, ref Int32 pos, out Int32 value)
     {
         bool result = Unmarshal(buffer, ref pos, out uint temp_value);
         value = (Int32)temp_value;
         return result;
     }
-
     public static bool Unmarshal(Byte[] buffer, ref Int32 pos, out Int32 value)
     {
         bool result = Unmarshal(buffer, ref pos, out uint temp_value);
         value = (Int32)temp_value;
         return result;
     }
-
-    public static bool Unmarshal(List<Byte> buffer, ref Int32 pos, out UInt32 value) =>
-        Unmarshal(buffer.ToArray(), ref pos, out value);
-
+    public static bool Unmarshal(List<Byte> buffer, ref Int32 pos, out UInt32 value) => Unmarshal(buffer.ToArray(), ref pos, out value);
     public static bool Unmarshal(Byte[] buffer, ref Int32 pos, out UInt32 value)
     {
         value = 0;
@@ -72,13 +64,10 @@ public static class CUInt
         pos += 1;
         return true;
     }
-
     #endregion
 
     private static bool eos(this Byte[] buffer, Int32 position) => position > buffer.Length;
 
     private static UInt16 byteorder_16(UInt16 x) => (UInt16)(((x & 0x000000FF) << 8) + (x >> 8 & 0x000000FF));
-
-    private static UInt32 byteorder_32(UInt32 x) => ((x & 0x000000FF) << 24) + ((x >> 8 & 0x000000FF) << 16) +
-                                                    ((x >> 16 & 0x000000FF) << 8) + (x >> 24 & 0x000000FF);
+    private static UInt32 byteorder_32(UInt32 x) => ((x & 0x000000FF) << 24) + ((x >> 8 & 0x000000FF) << 16) + ((x >> 16 & 0x000000FF) << 8) + (x >> 24 & 0x000000FF);
 }

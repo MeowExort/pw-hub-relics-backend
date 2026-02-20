@@ -1,4 +1,4 @@
-namespace Pw.Hub.Relics.Shared.Packets;
+﻿namespace Pw.Hub.Relics.Shared.Packets.Protocol;
 
 public interface IGamePacket
 {
