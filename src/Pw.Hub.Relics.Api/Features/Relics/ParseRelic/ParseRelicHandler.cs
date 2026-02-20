@@ -169,7 +169,7 @@ public class ParseRelicHandler : IRequestHandler<ParseRelicCommand, ParseRelicRe
         var baseExp = 0;
         switch (relicDefinition.SoulLevel)
         {
-            case 1: baseExp = 5000; break;
+            case 1: baseExp = 500; break;
             case 2: baseExp = 2000; break;
             case 3: baseExp = 5000; break;
             case 4: baseExp = 15000; break;
