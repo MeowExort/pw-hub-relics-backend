@@ -138,7 +138,7 @@ public class ParseRelicHandler : IRequestHandler<ParseRelicCommand, ParseRelicRe
 
                                 // Очищаем коллекцию в памяти и создаём новые атрибуты
                                 existingListing.Attributes.Clear();
-                                existingListing.Attributes = CreateAttributes(lot.relic_item, relicDefinition, existingListing.Id);
+                                existingListing.Attributes = CreateAttributes(lot.relic_item, relicDefinition, existingListing.Id, _logger);
                             }
 
                             updatedCount++;
@@ -162,7 +162,7 @@ public class ParseRelicHandler : IRequestHandler<ParseRelicCommand, ParseRelicRe
                                 AttributesHash = incomingHash
                             };
 
-                            newListing.Attributes = CreateAttributes(lot.relic_item, relicDefinition, newListing.Id);
+                            newListing.Attributes = CreateAttributes(lot.relic_item, relicDefinition, newListing.Id, _logger);
 
                             _dbContext.RelicListings.Add(newListing);
                             newListings.Add(newListing);
@@ -302,40 +302,54 @@ public class ParseRelicHandler : IRequestHandler<ParseRelicCommand, ParseRelicRe
     private static List<RelicAttribute> CreateAttributes(
         Relic relic, 
         RelicDefinition relicDefinition, 
-        Guid listingId)
+        Guid listingId,
+        ILogger logger)
     {
         var attributes = new List<RelicAttribute>();
 
         // Основной атрибут
         if (relic.main_addon >= 0)
         {
-            attributes.Add(new RelicAttribute
-            {
-                Id = Guid.NewGuid(),
-                RelicListingId = listingId,
-                AttributeDefinitionId = AddonMapping.GetRelicAttributeType(relic.main_addon) ?? 0,
-                Value = RelicHelper.GetMainAddonValue(
-                    relic.main_addon, 
-                    relic.exp, 
-                    relicDefinition.SoulLevel, 
-                    relicDefinition.MainAttributeScaling),
-                Category = AttributeCategory.Main
-            });
-        }
-
-        // Дополнительные атрибуты
-        foreach (var addon in relic.addons)
-        {
-            if (AddonMapping.GetRelicAttributeType(relic.main_addon) > 0)
+            var attributeId = AddonMapping.GetRelicAttributeType(relic.main_addon);
+            if (attributeId.HasValue)
             {
                 attributes.Add(new RelicAttribute
                 {
                     Id = Guid.NewGuid(),
                     RelicListingId = listingId,
-                    AttributeDefinitionId = AddonMapping.GetRelicAttributeType(addon.id)!.Value,
+                    AttributeDefinitionId = attributeId.Value,
+                    Value = RelicHelper.GetMainAddonValue(
+                        relic.main_addon, 
+                        relic.exp, 
+                        relicDefinition.SoulLevel, 
+                        relicDefinition.MainAttributeScaling),
+                    Category = AttributeCategory.Main
+                });
+            }
+            else
+            {
+                logger.LogWarning("[ParseRelic] Missing main addon mapping for ID: {AddonId}", relic.main_addon);
+            }
+        }
+
+        // Дополнительные атрибуты
+        foreach (var addon in relic.addons)
+        {
+            var attributeId = AddonMapping.GetRelicAttributeType(addon.id);
+            if (attributeId.HasValue)
+            {
+                attributes.Add(new RelicAttribute
+                {
+                    Id = Guid.NewGuid(),
+                    RelicListingId = listingId,
+                    AttributeDefinitionId = attributeId.Value,
                     Value = EquipmentAddonHelper.GetAddonValue(addon.id, addon.value),
                     Category = AttributeCategory.Additional
                 });
+            }
+            else
+            {
+                logger.LogWarning("[ParseRelic] Missing additional addon mapping for ID: {AddonId}", addon.id);
             }
         }
 
