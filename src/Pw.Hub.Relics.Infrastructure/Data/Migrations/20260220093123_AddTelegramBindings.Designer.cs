@@ -3,6 +3,7 @@ using System;
 using System.Collections.Generic;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using Pw.Hub.Relics.Infrastructure.Data;
@@ -12,9 +13,11 @@ using Pw.Hub.Relics.Infrastructure.Data;
 namespace Pw.Hub.Relics.Infrastructure.Migrations
 {
     [DbContext(typeof(RelicsDbContext))]
-    partial class RelicsDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260220093123_AddTelegramBindings")]
+    partial class AddTelegramBindings
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -277,7 +280,9 @@ namespace Pw.Hub.Relics.Infrastructure.Migrations
                         .HasColumnType("integer")
                         .HasColumnName("soul_type");
 
-                    // TelegramChatId removed; chat is resolved via TelegramBinding by UserId
+                    b.Property<long>("TelegramChatId")
+                        .HasColumnType("bigint")
+                        .HasColumnName("telegram_chat_id");
 
                     b.Property<DateTime>("UpdatedAt")
                         .ValueGeneratedOnAdd()

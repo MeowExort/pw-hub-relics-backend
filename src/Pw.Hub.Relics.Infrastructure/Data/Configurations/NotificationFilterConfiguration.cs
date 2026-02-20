@@ -31,10 +31,6 @@ public class NotificationFilterConfiguration : IEntityTypeConfiguration<Notifica
             .HasDefaultValue(true)
             .IsRequired();
 
-        builder.Property(x => x.TelegramChatId)
-            .HasColumnName("telegram_chat_id")
-            .IsRequired();
-
         builder.Property(x => x.SoulType)
             .HasColumnName("soul_type");
 

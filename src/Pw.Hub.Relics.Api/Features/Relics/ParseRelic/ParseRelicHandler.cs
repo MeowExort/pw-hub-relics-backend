@@ -1,3 +1,4 @@
+using System.Data;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
@@ -54,137 +55,148 @@ public class ParseRelicHandler : IRequestHandler<ParseRelicCommand, ParseRelicRe
         var relicIds = packet.lots.Select(l => l.relic_item.id).Distinct().ToList();
         var definitions = await GetRelicDefinitionsAsync(relicIds, cancellationToken);
 
-        // Задача 1: Batch-загрузка существующих листингов
         var sellerIds = packet.lots.Select(l => (long)l.sell_id.player_id).Distinct().ToList();
-        var existingListings = await _dbContext.RelicListings
-            .Include(rl => rl.Attributes)
-            .Where(rl => rl.ServerId == server.Id && sellerIds.Contains(rl.SellerCharacterId))
-            .ToListAsync(cancellationToken);
-
-        var listingsLookup = existingListings
-            .GroupBy(rl => (rl.SellerCharacterId, rl.ShopPosition))
-            .ToDictionary(g => g.Key, g => g.ToList());
-
-        // Задача 7: Счётчики для итогового логирования
+        
+        // Счётчики для итогового логирования
         var createdCount = 0;
         var updatedCount = 0;
         var skippedCount = 0;
         var newListings = new List<RelicListing>();
         var skippedRelicIds = new List<int>();
 
-        foreach (var lot in packet.lots)
-        {
-            if (!definitions.TryGetValue(lot.relic_item.id, out var relicDefinition))
-            {
-                skippedCount++;
-                skippedRelicIds.Add(lot.relic_item.id);
-                continue;
-            }
-
-            var key = (lot.sell_id.player_id, lot.sell_id.pos_in_shop);
-
-            // Задача 3: Вычисление хеша атрибутов
-            var incomingHash = AttributeHashHelper.ComputeHashFromRelic(lot.relic_item);
-
-            // Поиск существующего листинга по уникальному индексу (seller_character_id, shop_position, server_id, relic_definition_id)
-            RelicListing? existingListing = null;
-            if (listingsLookup.TryGetValue(key, out var candidates))
-            {
-                existingListing = candidates.FirstOrDefault(rl =>
-                    rl.RelicDefinitionId == relicDefinition.Id);
-            }
-
-            if (existingListing != null)
-            {
-                // Задача 4: Умное обновление - только изменившиеся поля
-                existingListing.LastSeenAt = DateTime.UtcNow;
-                existingListing.IsActive = true;
-                existingListing.AbsorbExperience = GetAbsorbExperience(lot.relic_item, relicDefinition);
-                existingListing.Price = lot.price;
-                existingListing.EnhancementLevel = lot.relic_item.reserve;
-                
-                // Обновляем атрибуты только если хеш изменился
-                if (existingListing.AttributesHash != incomingHash)
-                {
-                    existingListing.AttributesHash = incomingHash;
-                    // Удаляем старые атрибуты напрямую в базе (без concurrency проверки)
-                    // и отсоединяем их от контекста
-                    await _dbContext.RelicAttributes
-                        .Where(a => a.RelicListingId == existingListing.Id)
-                        .ExecuteDeleteAsync(cancellationToken);
-                    
-                    // Очищаем коллекцию в памяти и создаём новые атрибуты
-                    existingListing.Attributes.Clear();
-                    existingListing.Attributes = CreateAttributes(lot.relic_item, existingListing.Id);
-                }
-                updatedCount++;
-            }
-            else
-            {
-                // Создать новый лот
-                var newListing = new RelicListing
-                {
-                    Id = Guid.NewGuid(),
-                    RelicDefinitionId = relicDefinition.Id,
-                    AbsorbExperience = GetAbsorbExperience(lot.relic_item, relicDefinition),
-                    EnhancementLevel = lot.relic_item.reserve,
-                    SellerCharacterId = lot.sell_id.player_id,
-                    ShopPosition = lot.sell_id.pos_in_shop,
-                    Price = lot.price,
-                    ServerId = server.Id,
-                    CreatedAt = DateTime.UtcNow,
-                    LastSeenAt = DateTime.UtcNow,
-                    IsActive = true,
-                    AttributesHash = incomingHash
-                };
-
-                newListing.Attributes = CreateAttributes(lot.relic_item, newListing.Id);
-
-                _dbContext.RelicListings.Add(newListing);
-                newListings.Add(newListing);
-                createdCount++;
-            }
-        }
-
-        // Retry-логика для обработки DbUpdateConcurrencyException
+        // Retry-логика с полной перезагрузкой данных при конфликте
         const int maxRetries = 3;
         for (var attempt = 1; attempt <= maxRetries; attempt++)
         {
             try
             {
-                await _dbContext.SaveChangesAsync(cancellationToken);
-                break;
+                // Используем транзакцию с RepeatableRead для консистентности
+                await using var transaction = await _dbContext.Database
+                    .BeginTransactionAsync(IsolationLevel.RepeatableRead, cancellationToken);
+                
+                try
+                {
+                    // Сбрасываем счётчики и коллекции при каждой попытке
+                    createdCount = 0;
+                    updatedCount = 0;
+                    skippedCount = 0;
+                    newListings.Clear();
+                    skippedRelicIds.Clear();
+                    
+                    // Очищаем change tracker перед новой попыткой
+                    _dbContext.ChangeTracker.Clear();
+
+                    // Задача 1: Batch-загрузка существующих листингов
+                    var existingListings = await _dbContext.RelicListings
+                        .Include(rl => rl.Attributes)
+                        .Where(rl => rl.ServerId == server.Id && sellerIds.Contains(rl.SellerCharacterId))
+                        .ToListAsync(cancellationToken);
+
+                    var listingsLookup = existingListings
+                        .GroupBy(rl => (rl.SellerCharacterId, rl.ShopPosition))
+                        .ToDictionary(g => g.Key, g => g.ToList());
+
+                    foreach (var lot in packet.lots)
+                    {
+                        if (!definitions.TryGetValue(lot.relic_item.id, out var relicDefinition))
+                        {
+                            skippedCount++;
+                            skippedRelicIds.Add(lot.relic_item.id);
+                            continue;
+                        }
+
+                        var key = (lot.sell_id.player_id, lot.sell_id.pos_in_shop);
+
+                        // Задача 3: Вычисление хеша атрибутов
+                        var incomingHash = AttributeHashHelper.ComputeHashFromRelic(lot.relic_item);
+
+                        // Поиск существующего листинга по уникальному индексу
+                        RelicListing? existingListing = null;
+                        if (listingsLookup.TryGetValue(key, out var candidates))
+                        {
+                            existingListing = candidates.FirstOrDefault(rl =>
+                                rl.RelicDefinitionId == relicDefinition.Id);
+                        }
+
+                        if (existingListing != null)
+                        {
+                            // Задача 4: Умное обновление - только изменившиеся поля
+                            existingListing.LastSeenAt = DateTime.UtcNow;
+                            existingListing.IsActive = true;
+                            existingListing.AbsorbExperience = GetAbsorbExperience(lot.relic_item, relicDefinition);
+                            existingListing.Price = lot.price;
+                            existingListing.EnhancementLevel = lot.relic_item.reserve;
+                            
+                            // Обновляем атрибуты только если хеш изменился
+                            if (existingListing.AttributesHash != incomingHash)
+                            {
+                                existingListing.AttributesHash = incomingHash;
+                                // Удаляем старые атрибуты напрямую в базе (без concurrency проверки)
+                                await _dbContext.RelicAttributes
+                                    .Where(a => a.RelicListingId == existingListing.Id)
+                                    .ExecuteDeleteAsync(cancellationToken);
+                                
+                                // Очищаем коллекцию в памяти и создаём новые атрибуты
+                                existingListing.Attributes.Clear();
+                                existingListing.Attributes = CreateAttributes(lot.relic_item, existingListing.Id);
+                            }
+                            updatedCount++;
+                        }
+                        else
+                        {
+                            // Создать новый лот
+                            var newListing = new RelicListing
+                            {
+                                Id = Guid.NewGuid(),
+                                RelicDefinitionId = relicDefinition.Id,
+                                AbsorbExperience = GetAbsorbExperience(lot.relic_item, relicDefinition),
+                                EnhancementLevel = lot.relic_item.reserve,
+                                SellerCharacterId = lot.sell_id.player_id,
+                                ShopPosition = lot.sell_id.pos_in_shop,
+                                Price = lot.price,
+                                ServerId = server.Id,
+                                CreatedAt = DateTime.UtcNow,
+                                LastSeenAt = DateTime.UtcNow,
+                                IsActive = true,
+                                AttributesHash = incomingHash
+                            };
+
+                            newListing.Attributes = CreateAttributes(lot.relic_item, newListing.Id);
+
+                            _dbContext.RelicListings.Add(newListing);
+                            newListings.Add(newListing);
+                            createdCount++;
+                        }
+                    }
+
+                    await _dbContext.SaveChangesAsync(cancellationToken);
+                    await transaction.CommitAsync(cancellationToken);
+                    
+                    // Успешно - выходим из цикла retry
+                    break;
+                }
+                catch
+                {
+                    await transaction.RollbackAsync(cancellationToken);
+                    throw;
+                }
             }
-            catch (DbUpdateConcurrencyException ex) when (attempt < maxRetries)
+            catch (DbUpdateConcurrencyException) when (attempt < maxRetries)
             {
                 _logger.LogWarning(
                     "[ParseRelic] Concurrency conflict on attempt {Attempt}/{MaxRetries}. Retrying...",
                     attempt, maxRetries);
-
-                foreach (var entry in ex.Entries)
-                {
-                    var databaseValues = await entry.GetDatabaseValuesAsync(cancellationToken);
-                    
-                    if (databaseValues == null)
-                    {
-                        // Запись была удалена другим процессом - убираем из контекста
-                        entry.State = EntityState.Detached;
-                    }
-                    else if (entry.Entity is RelicListing listing)
-                    {
-                        // Для RelicListing: обновляем RowVersion и оригинальные значения
-                        entry.OriginalValues.SetValues(databaseValues);
-                        // Обновляем RowVersion из базы для следующей попытки
-                        listing.RowVersion = databaseValues.GetValue<uint>(nameof(RelicListing.RowVersion));
-                    }
-                    else
-                    {
-                        // Для других сущностей принимаем значения из базы
-                        entry.OriginalValues.SetValues(databaseValues);
-                    }
-                }
                 
-                // Небольшая задержка перед повторной попыткой
+                // Экспоненциальная задержка перед повторной попыткой
+                await Task.Delay(50 * attempt, cancellationToken);
+            }
+            catch (Npgsql.PostgresException ex) when (ex.SqlState == "40001" && attempt < maxRetries)
+            {
+                // Serialization failure - retry
+                _logger.LogWarning(
+                    "[ParseRelic] Serialization failure on attempt {Attempt}/{MaxRetries}. Retrying...",
+                    attempt, maxRetries);
+                
                 await Task.Delay(50 * attempt, cancellationToken);
             }
         }

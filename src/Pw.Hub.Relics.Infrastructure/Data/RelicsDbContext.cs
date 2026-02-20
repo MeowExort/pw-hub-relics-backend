@@ -18,6 +18,7 @@ public class RelicsDbContext : DbContext
     public DbSet<RelicAttribute> RelicAttributes => Set<RelicAttribute>();
     public DbSet<NotificationFilter> NotificationFilters => Set<NotificationFilter>();
     public DbSet<PriceHistory> PriceHistories => Set<PriceHistory>();
+    public DbSet<TelegramBinding> TelegramBindings => Set<TelegramBinding>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

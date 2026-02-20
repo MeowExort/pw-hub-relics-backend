@@ -70,7 +70,6 @@ public class NotificationsController : ControllerBase
             UserId = userId,
             Name = request.Name,
             IsEnabled = true,
-            TelegramChatId = request.TelegramChatId,
             SoulType = request.Criteria.SoulType.HasValue ? (SoulType)request.Criteria.SoulType.Value : null,
             SlotTypeId = request.Criteria.SlotTypeId,
             Race = request.Criteria.Race.HasValue ? (Race)request.Criteria.Race.Value : null,
@@ -129,7 +128,6 @@ public class NotificationsController : ControllerBase
         }
 
         filter.Name = request.Name;
-        filter.TelegramChatId = request.TelegramChatId;
         filter.SoulType = request.Criteria.SoulType.HasValue ? (SoulType)request.Criteria.SoulType.Value : null;
         filter.SlotTypeId = request.Criteria.SlotTypeId;
         filter.Race = request.Criteria.Race.HasValue ? (Race)request.Criteria.Race.Value : null;
@@ -202,7 +200,6 @@ public class NotificationsController : ControllerBase
             Id = filter.Id,
             Name = filter.Name,
             IsEnabled = filter.IsEnabled,
-            TelegramChatId = filter.TelegramChatId,
             Criteria = new FilterCriteriaDto
             {
                 SoulType = filter.SoulType.HasValue ? (int)filter.SoulType.Value : null,

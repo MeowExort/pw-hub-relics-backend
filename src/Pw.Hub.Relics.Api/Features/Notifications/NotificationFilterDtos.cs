@@ -8,7 +8,6 @@ public record NotificationFilterDto
     public Guid Id { get; init; }
     public required string Name { get; init; }
     public bool IsEnabled { get; init; }
-    public long TelegramChatId { get; init; }
     public required FilterCriteriaDto Criteria { get; init; }
     public DateTime CreatedAt { get; init; }
     public DateTime UpdatedAt { get; init; }
@@ -36,7 +35,6 @@ public record FilterCriteriaDto
 public record CreateFilterRequest
 {
     public required string Name { get; init; }
-    public long TelegramChatId { get; init; }
     public required FilterCriteriaDto Criteria { get; init; }
 }
 
@@ -46,7 +44,6 @@ public record CreateFilterRequest
 public record UpdateFilterRequest
 {
     public required string Name { get; init; }
-    public long TelegramChatId { get; init; }
     public required FilterCriteriaDto Criteria { get; init; }
 }
 

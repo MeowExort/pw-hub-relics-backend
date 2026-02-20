@@ -129,25 +129,43 @@ public class NotificationProcessorService : INotificationProcessor
         var message = BuildNotificationMessage(listing);
         
         _logger.LogInformation(
-            "Sending notification to chat {ChatId} for listing {ListingId}",
-            filter.TelegramChatId,
+            "Resolving chat for user {UserId} for listing {ListingId}",
+            filter.UserId,
             listing.Id);
 
         if (_telegramBotClient != null)
         {
             try
             {
-                await _telegramBotClient.SendMessage(
-                    chatId: filter.TelegramChatId,
-                    text: message,
-                    parseMode: Telegram.Bot.Types.Enums.ParseMode.Html,
-                    cancellationToken: cancellationToken);
-                
-                _logger.LogDebug("Notification sent successfully to chat {ChatId}", filter.TelegramChatId);
+                // Resolve chat id via user's Telegram binding
+                using var scope = _serviceProvider.CreateScope();
+                var dbContext = scope.ServiceProvider.GetRequiredService<RelicsDbContext>();
+
+                var binding = await dbContext.TelegramBindings
+                    .Where(b => b.UserId == filter.UserId && b.IsConfirmed && b.TelegramChatId != null)
+                    .OrderByDescending(b => b.UpdatedAt)
+                    .FirstOrDefaultAsync(cancellationToken);
+
+                if (binding?.TelegramChatId is long chatId)
+                {
+                    await _telegramBotClient.SendMessage(
+                        chatId: chatId,
+                        text: message,
+                        parseMode: Telegram.Bot.Types.Enums.ParseMode.Html,
+                        cancellationToken: cancellationToken);
+
+                    _logger.LogDebug("Notification sent successfully to chat {ChatId}", chatId);
+                }
+                else
+                {
+                    _logger.LogInformation(
+                        "No confirmed Telegram binding with chat id for user {UserId}. Skipping notification.",
+                        filter.UserId);
+                }
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Failed to send Telegram notification to chat {ChatId}", filter.TelegramChatId);
+                _logger.LogError(ex, "Failed to send Telegram notification for user {UserId}", filter.UserId);
             }
         }
         else
