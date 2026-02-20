@@ -57,13 +57,9 @@ public class RelicDefinitionSeeder
             jsonContent = await File.ReadAllTextAsync(jsonUri, cancellationToken);
         }
 
-        // Проверяем, есть ли уже данные в таблице
-        var existingCount = await _context.RelicDefinitions.CountAsync(cancellationToken);
-        if (existingCount > 0)
-        {
-            _logger.LogInformation("RelicDefinitions table already contains {Count} records. Skipping seed.", existingCount);
-            return;
-        }
+        // Получаем существующие записи для проверки
+        var existingRelics = await _context.RelicDefinitions
+            .ToDictionaryAsync(x => x.Id, cancellationToken);
 
         // Десериализуем JSON
         var relicsDto = JsonSerializer.Deserialize<List<RelicJsonDto>>(jsonContent);
@@ -76,23 +72,69 @@ public class RelicDefinitionSeeder
 
         _logger.LogInformation("Found {Count} relics in JSON file", relicsDto.Count);
 
-        // Преобразуем DTO в сущности
-        var relicDefinitions = relicsDto.Select(dto => new RelicDefinition
+        var newDefinitions = new List<RelicDefinition>();
+        var updatedCount = 0;
+
+        foreach (var dto in relicsDto)
         {
-            Id = dto.Id,
-            Name = dto.Name,
-            SoulLevel = dto.Rarity,
-            SoulType = (SoulType)dto.Type,
-            SlotTypeId = dto.Category,
-            Race = (Race)dto.Race,
-            IconUri = BuildIconUri(iconBaseUri, dto.FileIcon)
-        }).ToList();
+            var scaling = new Dictionary<int, int>();
+            if (dto.ProfessionGroups != null)
+            {
+                foreach (var group in dto.ProfessionGroups)
+                {
+                    if (group.GroupId == 32804 && group.Extensions != null)
+                    {
+                        foreach (var ext in group.Extensions)
+                        {
+                            scaling[ext.ExtId] = ext.PropValue;
+                        }
+                    }
+                }
+            }
 
-        // Добавляем в базу данных
-        await _context.RelicDefinitions.AddRangeAsync(relicDefinitions, cancellationToken);
-        await _context.SaveChangesAsync(cancellationToken);
+            var finalScaling = scaling.Count > 0 ? scaling : null;
 
-        _logger.LogInformation("Successfully seeded {Count} relic definitions", relicDefinitions.Count);
+            if (existingRelics.TryGetValue(dto.Id, out var existing))
+            {
+                // Если запись есть, проверяем нужно ли обогатить MainAttributeScaling
+                if (existing.MainAttributeScaling == null && finalScaling != null)
+                {
+                    existing.MainAttributeScaling = finalScaling;
+                    updatedCount++;
+                }
+            }
+            else
+            {
+                // Если записи нет, создаем новую
+                newDefinitions.Add(new RelicDefinition
+                {
+                    Id = dto.Id,
+                    Name = dto.Name,
+                    SoulLevel = dto.Rarity,
+                    SoulType = (SoulType)dto.Type,
+                    SlotTypeId = dto.Category,
+                    Race = (Race)dto.Race,
+                    IconUri = BuildIconUri(iconBaseUri, dto.FileIcon),
+                    MainAttributeScaling = finalScaling
+                });
+            }
+        }
+
+        if (newDefinitions.Count > 0)
+        {
+            await _context.RelicDefinitions.AddRangeAsync(newDefinitions, cancellationToken);
+            _logger.LogInformation("Adding {Count} new relic definitions", newDefinitions.Count);
+        }
+
+        if (updatedCount > 0 || newDefinitions.Count > 0)
+        {
+            await _context.SaveChangesAsync(cancellationToken);
+            _logger.LogInformation("Successfully updated {Updated} and added {Added} relic definitions", updatedCount, newDefinitions.Count);
+        }
+        else
+        {
+            _logger.LogInformation("No changes needed for relic definitions");
+        }
     }
 
     /// <summary>

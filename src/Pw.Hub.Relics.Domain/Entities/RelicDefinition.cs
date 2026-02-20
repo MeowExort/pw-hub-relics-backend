@@ -29,4 +29,9 @@ public class RelicDefinition
     /// URI иконки реликвии
     /// </summary>
     public string? IconUri { get; set; }
+
+    /// <summary>
+    /// Сопоставление ID аддона и его максимального значения (из profession_group_ext)
+    /// </summary>
+    public Dictionary<int, int>? MainAttributeScaling { get; set; }
 }

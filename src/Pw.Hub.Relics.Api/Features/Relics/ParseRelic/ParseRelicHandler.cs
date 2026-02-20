@@ -56,7 +56,7 @@ public class ParseRelicHandler : IRequestHandler<ParseRelicCommand, ParseRelicRe
         var definitions = await GetRelicDefinitionsAsync(relicIds, cancellationToken);
 
         var sellerIds = packet.lots.Select(l => (long)l.sell_id.player_id).Distinct().ToList();
-        
+
         // Счётчики для итогового логирования
         var createdCount = 0;
         var updatedCount = 0;
@@ -73,7 +73,7 @@ public class ParseRelicHandler : IRequestHandler<ParseRelicCommand, ParseRelicRe
                 // Используем транзакцию с RepeatableRead для консистентности
                 await using var transaction = await _dbContext.Database
                     .BeginTransactionAsync(IsolationLevel.RepeatableRead, cancellationToken);
-                
+
                 try
                 {
                     // Сбрасываем счётчики и коллекции при каждой попытке
@@ -82,7 +82,7 @@ public class ParseRelicHandler : IRequestHandler<ParseRelicCommand, ParseRelicRe
                     skippedCount = 0;
                     newListings.Clear();
                     skippedRelicIds.Clear();
-                    
+
                     // Очищаем change tracker перед новой попыткой
                     _dbContext.ChangeTracker.Clear();
 
@@ -124,9 +124,9 @@ public class ParseRelicHandler : IRequestHandler<ParseRelicCommand, ParseRelicRe
                             existingListing.LastSeenAt = DateTime.UtcNow;
                             existingListing.IsActive = true;
                             existingListing.AbsorbExperience = GetAbsorbExperience(lot.relic_item, relicDefinition);
-                            existingListing.Price = lot.price;
-                            existingListing.EnhancementLevel = lot.relic_item.reserve;
-                            
+                            existingListing.Price = (long)(lot.price * 1.08);
+                            existingListing.EnhancementLevel = RelicHelper.GetRelicRefineLevel(lot.relic_item.exp);
+
                             // Обновляем атрибуты только если хеш изменился
                             if (existingListing.AttributesHash != incomingHash)
                             {
@@ -135,11 +135,12 @@ public class ParseRelicHandler : IRequestHandler<ParseRelicCommand, ParseRelicRe
                                 await _dbContext.RelicAttributes
                                     .Where(a => a.RelicListingId == existingListing.Id)
                                     .ExecuteDeleteAsync(cancellationToken);
-                                
+
                                 // Очищаем коллекцию в памяти и создаём новые атрибуты
                                 existingListing.Attributes.Clear();
-                                existingListing.Attributes = CreateAttributes(lot.relic_item, existingListing.Id);
+                                existingListing.Attributes = CreateAttributes(lot.relic_item, relicDefinition, existingListing.Id);
                             }
+
                             updatedCount++;
                         }
                         else
@@ -150,10 +151,10 @@ public class ParseRelicHandler : IRequestHandler<ParseRelicCommand, ParseRelicRe
                                 Id = Guid.NewGuid(),
                                 RelicDefinitionId = relicDefinition.Id,
                                 AbsorbExperience = GetAbsorbExperience(lot.relic_item, relicDefinition),
-                                EnhancementLevel = lot.relic_item.reserve,
+                                EnhancementLevel = RelicHelper.GetRelicRefineLevel(lot.relic_item.exp),
                                 SellerCharacterId = lot.sell_id.player_id,
                                 ShopPosition = lot.sell_id.pos_in_shop,
-                                Price = lot.price,
+                                Price = (long)(lot.price * 1.08),
                                 ServerId = server.Id,
                                 CreatedAt = DateTime.UtcNow,
                                 LastSeenAt = DateTime.UtcNow,
@@ -161,7 +162,7 @@ public class ParseRelicHandler : IRequestHandler<ParseRelicCommand, ParseRelicRe
                                 AttributesHash = incomingHash
                             };
 
-                            newListing.Attributes = CreateAttributes(lot.relic_item, newListing.Id);
+                            newListing.Attributes = CreateAttributes(lot.relic_item, relicDefinition, newListing.Id);
 
                             _dbContext.RelicListings.Add(newListing);
                             newListings.Add(newListing);
@@ -171,7 +172,7 @@ public class ParseRelicHandler : IRequestHandler<ParseRelicCommand, ParseRelicRe
 
                     await _dbContext.SaveChangesAsync(cancellationToken);
                     await transaction.CommitAsync(cancellationToken);
-                    
+
                     // Успешно - выходим из цикла retry
                     break;
                 }
@@ -186,7 +187,7 @@ public class ParseRelicHandler : IRequestHandler<ParseRelicCommand, ParseRelicRe
                 _logger.LogWarning(
                     "[ParseRelic] Concurrency conflict on attempt {Attempt}/{MaxRetries}. Retrying...",
                     attempt, maxRetries);
-                
+
                 // Экспоненциальная задержка перед повторной попыткой
                 await Task.Delay(50 * attempt, cancellationToken);
             }
@@ -196,7 +197,7 @@ public class ParseRelicHandler : IRequestHandler<ParseRelicCommand, ParseRelicRe
                 _logger.LogWarning(
                     "[ParseRelic] Serialization failure on attempt {Attempt}/{MaxRetries}. Retrying...",
                     attempt, maxRetries);
-                
+
                 await Task.Delay(50 * attempt, cancellationToken);
             }
         }
@@ -298,7 +299,10 @@ public class ParseRelicHandler : IRequestHandler<ParseRelicCommand, ParseRelicRe
         return result;
     }
 
-    private static List<RelicAttribute> CreateAttributes(Relic relic, Guid listingId)
+    private static List<RelicAttribute> CreateAttributes(
+        Relic relic, 
+        RelicDefinition relicDefinition, 
+        Guid listingId)
     {
         var attributes = new List<RelicAttribute>();
 
@@ -310,7 +314,11 @@ public class ParseRelicHandler : IRequestHandler<ParseRelicCommand, ParseRelicRe
                 Id = Guid.NewGuid(),
                 RelicListingId = listingId,
                 AttributeDefinitionId = AddonMapping.GetRelicAttributeType(relic.main_addon) ?? 0,
-                Value = 0, // Значение основного атрибута не передаётся в пакете
+                Value = RelicHelper.GetMainAddonValue(
+                    relic.main_addon, 
+                    relic.exp, 
+                    relicDefinition.SoulLevel, 
+                    relicDefinition.MainAttributeScaling),
                 Category = AttributeCategory.Main
             });
         }
@@ -318,14 +326,17 @@ public class ParseRelicHandler : IRequestHandler<ParseRelicCommand, ParseRelicRe
         // Дополнительные атрибуты
         foreach (var addon in relic.addons)
         {
-            attributes.Add(new RelicAttribute
+            if (AddonMapping.GetRelicAttributeType(relic.main_addon) > 0)
             {
-                Id = Guid.NewGuid(),
-                RelicListingId = listingId,
-                AttributeDefinitionId = AddonMapping.GetRelicAttributeType(addon.id) ?? 0,
-                Value = addon.value,
-                Category = AttributeCategory.Additional
-            });
+                attributes.Add(new RelicAttribute
+                {
+                    Id = Guid.NewGuid(),
+                    RelicListingId = listingId,
+                    AttributeDefinitionId = AddonMapping.GetRelicAttributeType(addon.id)!.Value,
+                    Value = EquipmentAddonHelper.GetAddonValue(addon.id, addon.value),
+                    Category = AttributeCategory.Additional
+                });
+            }
         }
 
         return attributes;

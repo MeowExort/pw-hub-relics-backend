@@ -41,6 +41,10 @@ public class RelicDefinitionConfiguration : IEntityTypeConfiguration<RelicDefini
             .HasColumnName("icon_uri")
             .HasMaxLength(500);
 
+        builder.Property(x => x.MainAttributeScaling)
+            .HasColumnName("main_attribute_scaling")
+            .HasColumnType("jsonb");
+
         builder.HasOne(x => x.SlotType)
             .WithMany()
             .HasForeignKey(x => x.SlotTypeId)

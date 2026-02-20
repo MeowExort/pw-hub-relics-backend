@@ -5,6 +5,7 @@ using Microsoft.IdentityModel.Tokens;
 using Pw.Hub.Relics.Api.BackgroundJobs;
 using Pw.Hub.Relics.Infrastructure.Data;
 using Pw.Hub.Relics.Infrastructure.Data.Seeding;
+using Pw.Hub.Relics.Shared.Helpers;
 using Telegram.Bot;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -132,6 +133,24 @@ using (var scope = app.Services.CreateScope())
     {
         var logger = services.GetRequiredService<ILogger<Pw.Hub.Relics.Api.Program>>();
         logger.LogError(ex, "An error occurred while migrating or seeding the database");
+    }
+}
+
+// Load Equipment Addons data for addon value calculation
+var equipmentAddonUri = builder.Configuration["Seeding:EquipmentAddonUri"] ?? "https://cdn.pw-hub.ru/relics/EQUIPMENT_ADDON.json";
+try
+{
+    await EquipmentAddonHelper.LoadAddonsFromUriAsync(equipmentAddonUri);
+}
+catch (Exception ex)
+{
+    var logger = app.Services.GetRequiredService<ILogger<Pw.Hub.Relics.Api.Program>>();
+    logger.LogWarning(ex, "Failed to load equipment addons from URI: {Uri}. Falling back to local file if exists.", equipmentAddonUri);
+    
+    var equipmentAddonPath = builder.Configuration["Seeding:EquipmentAddonJsonPath"] ?? "EQUIPMENT_ADDON.json";
+    if (File.Exists(equipmentAddonPath))
+    {
+        EquipmentAddonHelper.LoadAddons(equipmentAddonPath);
     }
 }
 
