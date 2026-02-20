@@ -67,6 +67,13 @@ public class RelicListingConfiguration : IEntityTypeConfiguration<RelicListing>
             .HasColumnName("attributes_hash")
             .HasMaxLength(64);
 
+        // Concurrency token using PostgreSQL xmin system column
+        builder.Property(x => x.RowVersion)
+            .HasColumnName("xmin")
+            .HasColumnType("xid")
+            .ValueGeneratedOnAddOrUpdate()
+            .IsConcurrencyToken();
+
         // Relationships
         builder.HasOne(x => x.RelicDefinition)
             .WithMany()

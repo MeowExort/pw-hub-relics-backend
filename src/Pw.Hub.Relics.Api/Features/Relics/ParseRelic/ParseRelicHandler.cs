@@ -140,7 +140,46 @@ public class ParseRelicHandler : IRequestHandler<ParseRelicCommand, ParseRelicRe
             }
         }
 
-        await _dbContext.SaveChangesAsync(cancellationToken);
+        // Retry-логика для обработки DbUpdateConcurrencyException
+        const int maxRetries = 3;
+        for (var attempt = 1; attempt <= maxRetries; attempt++)
+        {
+            try
+            {
+                await _dbContext.SaveChangesAsync(cancellationToken);
+                break;
+            }
+            catch (DbUpdateConcurrencyException ex) when (attempt < maxRetries)
+            {
+                _logger.LogWarning(
+                    "[ParseRelic] Concurrency conflict on attempt {Attempt}/{MaxRetries}. Retrying...",
+                    attempt, maxRetries);
+
+                foreach (var entry in ex.Entries)
+                {
+                    if (entry.Entity is RelicListing)
+                    {
+                        // Перезагружаем данные из базы
+                        await entry.ReloadAsync(cancellationToken);
+                    }
+                    else
+                    {
+                        // Для других сущностей принимаем значения из базы
+                        var databaseValues = await entry.GetDatabaseValuesAsync(cancellationToken);
+                        if (databaseValues == null)
+                        {
+                            // Запись была удалена - убираем из контекста
+                            entry.State = EntityState.Detached;
+                        }
+                        else
+                        {
+                            // Обновляем оригинальные значения
+                            entry.OriginalValues.SetValues(databaseValues);
+                        }
+                    }
+                }
+            }
+        }
 
         // Задача 6: Пакетная отправка уведомлений в очередь
         if (newListings.Count > 0)

@@ -52,4 +52,9 @@ public class RelicListing
     /// SHA256 хеш атрибутов для быстрого поиска
     /// </summary>
     public string? AttributesHash { get; set; }
+    
+    /// <summary>
+    /// Версия строки для оптимистичной блокировки (PostgreSQL xmin)
+    /// </summary>
+    public uint RowVersion { get; set; }
 }
