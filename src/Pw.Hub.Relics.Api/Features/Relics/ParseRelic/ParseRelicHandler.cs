@@ -86,14 +86,12 @@ public class ParseRelicHandler : IRequestHandler<ParseRelicCommand, ParseRelicRe
             // Задача 3: Вычисление хеша атрибутов
             var incomingHash = AttributeHashHelper.ComputeHashFromRelic(lot.relic_item);
 
-            // Задача 3: Поиск по хешу атрибутов в локальном словаре
+            // Поиск существующего листинга по уникальному индексу (seller_character_id, shop_position, server_id, relic_definition_id)
             RelicListing? existingListing = null;
             if (listingsLookup.TryGetValue(key, out var candidates))
             {
                 existingListing = candidates.FirstOrDefault(rl =>
-                    rl.RelicDefinitionId == relicDefinition.Id &&
-                    rl.EnhancementLevel == lot.relic_item.reserve &&
-                    rl.AttributesHash == incomingHash);
+                    rl.RelicDefinitionId == relicDefinition.Id);
             }
 
             if (existingListing != null)
@@ -103,7 +101,16 @@ public class ParseRelicHandler : IRequestHandler<ParseRelicCommand, ParseRelicRe
                 existingListing.IsActive = true;
                 existingListing.AbsorbExperience = GetAbsorbExperience(lot.relic_item, relicDefinition);
                 existingListing.Price = lot.price;
-                // Атрибуты не обновляем, т.к. хеш совпал
+                existingListing.EnhancementLevel = lot.relic_item.reserve;
+                
+                // Обновляем атрибуты только если хеш изменился
+                if (existingListing.AttributesHash != incomingHash)
+                {
+                    existingListing.AttributesHash = incomingHash;
+                    // Удаляем старые атрибуты и создаём новые
+                    _dbContext.RelicAttributes.RemoveRange(existingListing.Attributes);
+                    existingListing.Attributes = CreateAttributes(lot.relic_item, existingListing.Id);
+                }
                 updatedCount++;
             }
             else
