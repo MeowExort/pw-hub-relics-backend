@@ -62,11 +62,23 @@ builder.Services.AddAuthorization(options =>
 {
     // Политика для бота (запись реликвий)
     options.AddPolicy("BotPolicy", policy =>
-        policy.RequireClaim("scope", "relics:write"));
+        policy.RequireAssertion(context =>
+        {
+            var scopeClaim = context.User.FindFirst("scope")?.Value;
+            if (string.IsNullOrEmpty(scopeClaim)) return false;
+            var scopes = scopeClaim.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            return scopes.Contains("relics:write");
+        }));
     
     // Политика для пользователей (чтение реликвий)
     options.AddPolicy("UserPolicy", policy =>
-        policy.RequireClaim("scope", "relics:read"));
+        policy.RequireAssertion(context =>
+        {
+            var scopeClaim = context.User.FindFirst("scope")?.Value;
+            if (string.IsNullOrEmpty(scopeClaim)) return false;
+            var scopes = scopeClaim.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            return scopes.Contains("relics:read");
+        }));
 });
 
 // Controllers
