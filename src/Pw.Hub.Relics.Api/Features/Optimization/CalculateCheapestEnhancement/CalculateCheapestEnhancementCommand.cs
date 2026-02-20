@@ -1,4 +1,5 @@
 using MediatR;
+using Pw.Hub.Relics.Domain.Enums;
 
 namespace Pw.Hub.Relics.Api.Features.Optimization.CalculateCheapestEnhancement;
 
@@ -21,6 +22,11 @@ public record CalculateCheapestEnhancementCommand : IRequest<CalculateCheapestEn
     /// ID сервера
     /// </summary>
     public int ServerId { get; init; }
+    
+    /// <summary>
+    /// Тип души (Покоя или Тяньюя) - реликвии разных типов нельзя поглощать друг в друга
+    /// </summary>
+    public SoulType SoulType { get; init; }
 }
 
 /// <summary>
