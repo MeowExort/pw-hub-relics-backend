@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Pw.Hub.Relics.Infrastructure.Data;
+using Telegram.Bot;
 using Telegram.Bot.Types;
 using Telegram.Bot.Types.Enums;
 
@@ -12,13 +13,16 @@ public class TelegramWebhookController : ControllerBase
 {
     private readonly RelicsDbContext _dbContext;
     private readonly ILogger<TelegramWebhookController> _logger;
+    private readonly ITelegramBotClient? _telegramBotClient;
 
     public TelegramWebhookController(
         RelicsDbContext dbContext,
-        ILogger<TelegramWebhookController> logger)
+        ILogger<TelegramWebhookController> logger,
+        ITelegramBotClient? telegramBotClient = null)
     {
         _dbContext = dbContext;
         _logger = logger;
+        _telegramBotClient = telegramBotClient;
     }
 
     /// <summary>
@@ -111,5 +115,22 @@ public class TelegramWebhookController : ControllerBase
         _logger.LogInformation(
             "Successfully linked Telegram chat {ChatId} to user {UserId}",
             chatId, binding.UserId);
+
+        // Notify user in Telegram about successful linking
+        if (_telegramBotClient != null)
+        {
+            try
+            {
+                await _telegramBotClient.SendMessage(
+                    chatId: chatId,
+                    text: "✅ Привязка Telegram к аккаунту PW Hub Relics выполнена успешно. Теперь вы будете получать уведомления о новых лотах по вашим фильтрам.",
+                    parseMode: ParseMode.Html,
+                    cancellationToken: cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to send confirmation message to chat {ChatId}", chatId);
+            }
+        }
     }
 }

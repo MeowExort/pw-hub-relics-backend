@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Pw.Hub.Relics.Domain.Entities;
 using Pw.Hub.Relics.Infrastructure.Data;
+using Telegram.Bot;
 
 namespace Pw.Hub.Relics.Api.Features.Telegram;
 
@@ -15,15 +16,18 @@ public class TelegramController : ControllerBase
     private readonly RelicsDbContext _dbContext;
     private readonly IConfiguration _configuration;
     private readonly ILogger<TelegramController> _logger;
+    private readonly ITelegramBotClient? _telegramBotClient;
 
     public TelegramController(
         RelicsDbContext dbContext,
         IConfiguration configuration,
-        ILogger<TelegramController> logger)
+        ILogger<TelegramController> logger,
+        ITelegramBotClient? telegramBotClient = null)
     {
         _dbContext = dbContext;
         _configuration = configuration;
         _logger = logger;
+        _telegramBotClient = telegramBotClient;
     }
 
     /// <summary>
@@ -153,10 +157,27 @@ public class TelegramController : ControllerBase
             return NotFound(new { error = "No Telegram binding found" });
         }
 
+        var chatId = binding.TelegramChatId;
         _dbContext.TelegramBindings.Remove(binding);
         await _dbContext.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("User {UserId} unlinked Telegram account", userId);
+
+        // Try to notify user in Telegram about unlinking
+        if (_telegramBotClient != null && chatId != null)
+        {
+            try
+            {
+                await _telegramBotClient.SendMessage(
+                    chatId: chatId.Value,
+                    text: "ℹ️ Привязка Telegram к аккаунту PW Hub Relics отменена. Вы больше не будете получать уведомления.",
+                    cancellationToken: cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to send unlink notification to chat {ChatId}", chatId);
+            }
+        }
 
         return NoContent();
     }
