@@ -126,7 +126,6 @@ public class ParseRelicHandler : IRequestHandler<ParseRelicCommand, ParseRelicRe
                 };
 
                 newListing.Attributes = CreateAttributes(lot.relic_item, newListing.Id);
-                newListing.RelicDefinition = relicDefinition;
 
                 _dbContext.RelicListings.Add(newListing);
                 newListings.Add(newListing);
