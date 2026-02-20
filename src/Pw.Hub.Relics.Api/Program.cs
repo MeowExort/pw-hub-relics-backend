@@ -66,7 +66,7 @@ builder.Services.AddAuthorization(options =>
     
     // Политика для пользователей (чтение реликвий)
     options.AddPolicy("UserPolicy", policy =>
-        policy.RequireClaim("scope", "relics:write"));
+        policy.RequireClaim("scope", "relics:read"));
 });
 
 // Controllers
