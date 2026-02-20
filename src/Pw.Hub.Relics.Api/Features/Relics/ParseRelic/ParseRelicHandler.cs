@@ -157,27 +157,29 @@ public class ParseRelicHandler : IRequestHandler<ParseRelicCommand, ParseRelicRe
 
                 foreach (var entry in ex.Entries)
                 {
-                    if (entry.Entity is RelicListing)
+                    var databaseValues = await entry.GetDatabaseValuesAsync(cancellationToken);
+                    
+                    if (databaseValues == null)
                     {
-                        // Перезагружаем данные из базы
-                        await entry.ReloadAsync(cancellationToken);
+                        // Запись была удалена другим процессом - убираем из контекста
+                        entry.State = EntityState.Detached;
+                    }
+                    else if (entry.Entity is RelicListing listing)
+                    {
+                        // Для RelicListing: обновляем RowVersion и оригинальные значения
+                        entry.OriginalValues.SetValues(databaseValues);
+                        // Обновляем RowVersion из базы для следующей попытки
+                        listing.RowVersion = databaseValues.GetValue<uint>(nameof(RelicListing.RowVersion));
                     }
                     else
                     {
                         // Для других сущностей принимаем значения из базы
-                        var databaseValues = await entry.GetDatabaseValuesAsync(cancellationToken);
-                        if (databaseValues == null)
-                        {
-                            // Запись была удалена - убираем из контекста
-                            entry.State = EntityState.Detached;
-                        }
-                        else
-                        {
-                            // Обновляем оригинальные значения
-                            entry.OriginalValues.SetValues(databaseValues);
-                        }
+                        entry.OriginalValues.SetValues(databaseValues);
                     }
                 }
+                
+                // Небольшая задержка перед повторной попыткой
+                await Task.Delay(50 * attempt, cancellationToken);
             }
         }
 
