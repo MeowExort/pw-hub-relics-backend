@@ -107,8 +107,14 @@ public class ParseRelicHandler : IRequestHandler<ParseRelicCommand, ParseRelicRe
                 if (existingListing.AttributesHash != incomingHash)
                 {
                     existingListing.AttributesHash = incomingHash;
-                    // Удаляем старые атрибуты и создаём новые
-                    _dbContext.RelicAttributes.RemoveRange(existingListing.Attributes);
+                    // Удаляем старые атрибуты напрямую в базе (без concurrency проверки)
+                    // и отсоединяем их от контекста
+                    await _dbContext.RelicAttributes
+                        .Where(a => a.RelicListingId == existingListing.Id)
+                        .ExecuteDeleteAsync(cancellationToken);
+                    
+                    // Очищаем коллекцию в памяти и создаём новые атрибуты
+                    existingListing.Attributes.Clear();
                     existingListing.Attributes = CreateAttributes(lot.relic_item, existingListing.Id);
                 }
                 updatedCount++;
