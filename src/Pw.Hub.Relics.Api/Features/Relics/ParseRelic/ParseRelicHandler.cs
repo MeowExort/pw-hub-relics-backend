@@ -26,6 +26,9 @@ public class ParseRelicHandler : IRequestHandler<ParseRelicCommand, ParseRelicRe
 
     public async Task<ParseRelicResult> Handle(ParseRelicCommand request, CancellationToken cancellationToken)
     {
+        _logger.LogInformation("[ParseRelic] Incoming data (hex): {DataHex}", Convert.ToHexString(request.Data));
+
+        return new ParseRelicResult(0, 0, "-");
         using var packetStream = new PacketStream(request.Data);
 
         var packet = new GetRelicDetail_Re();
