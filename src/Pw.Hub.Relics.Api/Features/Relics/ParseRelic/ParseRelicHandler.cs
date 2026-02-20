@@ -82,7 +82,7 @@ public class ParseRelicHandler : IRequestHandler<ParseRelicCommand, ParseRelicRe
             }
 
             var key = (lot.sell_id.player_id, lot.sell_id.pos_in_shop);
-            
+
             // Задача 3: Вычисление хеша атрибутов
             var incomingHash = AttributeHashHelper.ComputeHashFromRelic(lot.relic_item);
 
@@ -101,7 +101,7 @@ public class ParseRelicHandler : IRequestHandler<ParseRelicCommand, ParseRelicRe
                 // Задача 4: Умное обновление - только изменившиеся поля
                 existingListing.LastSeenAt = DateTime.UtcNow;
                 existingListing.IsActive = true;
-                existingListing.AbsorbExperience = lot.relic_item.exp;
+                existingListing.AbsorbExperience = GetAbsorbExperience(lot.relic_item, relicDefinition);
                 existingListing.Price = lot.price;
                 // Атрибуты не обновляем, т.к. хеш совпал
                 updatedCount++;
@@ -113,7 +113,7 @@ public class ParseRelicHandler : IRequestHandler<ParseRelicCommand, ParseRelicRe
                 {
                     Id = Guid.NewGuid(),
                     RelicDefinitionId = relicDefinition.Id,
-                    AbsorbExperience = lot.relic_item.exp,
+                    AbsorbExperience = GetAbsorbExperience(lot.relic_item, relicDefinition),
                     EnhancementLevel = lot.relic_item.reserve,
                     SellerCharacterId = lot.sell_id.player_id,
                     ShopPosition = lot.sell_id.pos_in_shop,
@@ -157,13 +157,31 @@ public class ParseRelicHandler : IRequestHandler<ParseRelicCommand, ParseRelicRe
             $"Successfully processed {packet.lots.Count} lots.");
     }
 
+    private int GetAbsorbExperience(Relic lotRelicItem, RelicDefinition relicDefinition)
+    {
+        var baseExp = 0;
+        switch (relicDefinition.SoulLevel)
+        {
+            case 1: baseExp = 5000; break;
+            case 2: baseExp = 2000; break;
+            case 3: baseExp = 5000; break;
+            case 4: baseExp = 15000; break;
+            case 5: baseExp = 30000; break;
+        }
+
+        if (lotRelicItem.exp == 0)
+            return baseExp;
+
+        return (int)(lotRelicItem.exp * 0.7) + baseExp;
+    }
+
     /// <summary>
     /// Задача 2: Кэширование ServerDefinitions (TTL 5 мин)
     /// </summary>
     private async Task<ServerDefinition?> GetServerAsync(string serverKey, CancellationToken ct)
     {
         var cacheKey = $"server:{serverKey.ToLower()}";
-        
+
         return await _cache.GetOrCreateAsync(cacheKey, async entry =>
         {
             entry.AbsoluteExpirationRelativeToNow = TimeSpan.FromHours(24);
