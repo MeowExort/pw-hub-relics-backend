@@ -3,6 +3,7 @@ using System;
 using System.Collections.Generic;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using Pw.Hub.Relics.Domain.Entities;
@@ -13,9 +14,11 @@ using Pw.Hub.Relics.Infrastructure.Data;
 namespace Pw.Hub.Relics.Infrastructure.Migrations
 {
     [DbContext(typeof(RelicsDbContext))]
-    partial class RelicsDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260221121002_UpdateAttrLogic")]
+    partial class UpdateAttrLogic
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
