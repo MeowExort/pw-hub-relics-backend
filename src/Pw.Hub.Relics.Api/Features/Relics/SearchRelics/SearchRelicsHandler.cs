@@ -60,13 +60,14 @@ public class SearchRelicsHandler : IRequestHandler<SearchRelicsQuery, SearchReli
                 a.AttributeDefinitionId == request.MainAttributeId.Value));
         }
 
-        if (request.AdditionalAttributeIds is { Length: > 0 })
+        if (request.AdditionalAttributes is { Count: > 0 })
         {
-            foreach (var attrId in request.AdditionalAttributeIds)
+            foreach (var attr in request.AdditionalAttributes)
             {
                 query = query.Where(r => r.Attributes.Any(a => 
                     a.Category == AttributeCategory.Additional && 
-                    a.AttributeDefinitionId == attrId));
+                    a.AttributeDefinitionId == attr.Id &&
+                    (!attr.MinValue.HasValue || a.Value >= attr.MinValue.Value)));
             }
         }
 

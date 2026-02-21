@@ -33,9 +33,9 @@ public record SearchRelicsQuery : IRequest<SearchRelicsResponse>
     public int? MainAttributeId { get; init; }
     
     /// <summary>
-    /// ID дополнительных характеристик
+    /// Характеристики для фильтрации
     /// </summary>
-    public int[]? AdditionalAttributeIds { get; init; }
+    public List<RelicAttributeFilterDto>? AdditionalAttributes { get; init; }
     
     /// <summary>
     /// Минимальная цена (серебро)
@@ -129,3 +129,8 @@ public record RelicAttributeDto
 /// DTO определения характеристики
 /// </summary>
 public record AttributeDefinitionDto(int Id, string Name);
+
+/// <summary>
+/// Фильтр по характеристикам
+/// </summary>
+public record RelicAttributeFilterDto(int Id, int? MinValue);
