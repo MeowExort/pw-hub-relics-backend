@@ -16,13 +16,17 @@ public class GetPriceTrendsHandler : IRequestHandler<GetPriceTrendsQuery, GetPri
 
     public async Task<GetPriceTrendsResponse> Handle(GetPriceTrendsQuery request, CancellationToken cancellationToken)
     {
+        // Конвертация дат в UTC для PostgreSQL
+        var startDate = DateTime.SpecifyKind(request.StartDate, DateTimeKind.Utc);
+        var requestEndDate = DateTime.SpecifyKind(request.EndDate, DateTimeKind.Utc);
+        
         // Валидация периода (максимум 1 месяц)
-        var maxEndDate = request.StartDate.AddMonths(1);
-        var endDate = request.EndDate > maxEndDate ? maxEndDate : request.EndDate;
+        var maxEndDate = startDate.AddMonths(1);
+        var endDate = requestEndDate > maxEndDate ? maxEndDate : requestEndDate;
 
         var query = _dbContext.RelicListings
             .Include(r => r.RelicDefinition)
-            .Where(r => r.CreatedAt >= request.StartDate && r.CreatedAt <= endDate)
+            .Where(r => r.CreatedAt >= startDate && r.CreatedAt <= endDate)
             .AsNoTracking()
             .AsQueryable();
 
@@ -76,7 +80,7 @@ public class GetPriceTrendsHandler : IRequestHandler<GetPriceTrendsQuery, GetPri
 
         if (listings.Count == 0)
         {
-            return CreateEmptyResponse(request, endDate);
+            return CreateEmptyResponse(request, startDate, endDate);
         }
 
         // Группировка по периодам
@@ -99,7 +103,7 @@ public class GetPriceTrendsHandler : IRequestHandler<GetPriceTrendsQuery, GetPri
         return new GetPriceTrendsResponse
         {
             Filters = filters,
-            Period = new PeriodDto(request.StartDate, endDate),
+            Period = new PeriodDto(startDate, endDate),
             DataPoints = dataPoints,
             Statistics = new StatisticsDto
             {
@@ -192,7 +196,7 @@ public class GetPriceTrendsHandler : IRequestHandler<GetPriceTrendsQuery, GetPri
         };
     }
 
-    private GetPriceTrendsResponse CreateEmptyResponse(GetPriceTrendsQuery request, DateTime endDate)
+    private GetPriceTrendsResponse CreateEmptyResponse(GetPriceTrendsQuery request, DateTime startDate, DateTime endDate)
     {
         return new GetPriceTrendsResponse
         {
@@ -204,7 +208,7 @@ public class GetPriceTrendsHandler : IRequestHandler<GetPriceTrendsQuery, GetPri
                 SoulLevel = request.SoulLevel,
                 SoulType = request.SoulType
             },
-            Period = new PeriodDto(request.StartDate, endDate),
+            Period = new PeriodDto(startDate, endDate),
             DataPoints = new List<DataPointDto>(),
             Statistics = new StatisticsDto
             {
