@@ -86,12 +86,80 @@ public class SearchRelicsHandler : IRequestHandler<SearchRelicsQuery, SearchReli
             query = query.Where(r => r.ServerId == request.ServerId.Value);
         }
 
+        if (request.MinEnhancementLevel.HasValue)
+        {
+            query = query.Where(r => r.EnhancementLevel >= request.MinEnhancementLevel.Value);
+        }
+
+        if (request.MaxEnhancementLevel.HasValue)
+        {
+            query = query.Where(r => r.EnhancementLevel <= request.MaxEnhancementLevel.Value);
+        }
+
+        if (request.MinAbsorbExperience.HasValue)
+        {
+            query = query.Where(r => r.AbsorbExperience >= request.MinAbsorbExperience.Value);
+        }
+
+        if (request.MaxAbsorbExperience.HasValue)
+        {
+            query = query.Where(r => r.AbsorbExperience <= request.MaxAbsorbExperience.Value);
+        }
+
         // Подсчет общего количества
         var totalCount = await query.CountAsync(cancellationToken);
 
         // Пагинация и сортировка
-        var items = await query
-            .OrderByDescending(r => r.CreatedAt)
+        var sortDirection = request.SortDirection?.ToLower() == "asc" ? "asc" : "desc";
+        var sortBy = request.SortBy?.ToLower();
+
+        IOrderedQueryable<Domain.Entities.RelicListing> orderedQuery;
+
+        if (sortBy == "price")
+        {
+            orderedQuery = sortDirection == "asc" 
+                ? query.OrderBy(r => r.Price) 
+                : query.OrderByDescending(r => r.Price);
+        }
+        else if (sortBy == "enhancementlevel")
+        {
+            orderedQuery = sortDirection == "asc" 
+                ? query.OrderBy(r => r.EnhancementLevel).ThenByDescending(r => r.Price) 
+                : query.OrderByDescending(r => r.EnhancementLevel).ThenByDescending(r => r.Price);
+        }
+        else if (sortBy == "attributevalue" && request.SortAttributeId.HasValue)
+        {
+            // Сортировка по значению конкретного дополнительного атрибута
+            // Если у реликвии нет такого атрибута, она будет в конце (или начале в зависимости от направления)
+            // В EF Core это может быть сложно транслировать эффективно без Join, 
+            // но попробуем через проекцию или подзапрос.
+            
+            if (sortDirection == "asc")
+            {
+                orderedQuery = query.OrderBy(r => r.Attributes
+                        .Where(a => a.AttributeDefinitionId == request.SortAttributeId.Value && a.Category == AttributeCategory.Additional)
+                        .Select(a => (int?)a.Value)
+                        .FirstOrDefault() ?? 0)
+                    .ThenByDescending(r => r.Price);
+            }
+            else
+            {
+                orderedQuery = query.OrderByDescending(r => r.Attributes
+                        .Where(a => a.AttributeDefinitionId == request.SortAttributeId.Value && a.Category == AttributeCategory.Additional)
+                        .Select(a => (int?)a.Value)
+                        .FirstOrDefault() ?? 0)
+                    .ThenByDescending(r => r.Price);
+            }
+        }
+        else
+        {
+            // По умолчанию сортировка по CreatedAt (как было)
+            // Но в требовании сказано: "По умолчанию вторым параметром сортировки должна быть цена."
+            // А основным по умолчанию оставим CreatedAt, если не указано иное.
+            orderedQuery = query.OrderByDescending(r => r.CreatedAt).ThenByDescending(r => r.Price);
+        }
+
+        var items = await orderedQuery
             .Skip((pageNumber - 1) * pageSize)
             .Take(pageSize)
             .ToListAsync(cancellationToken);

@@ -53,6 +53,41 @@ public record SearchRelicsQuery : IRequest<SearchRelicsResponse>
     public int? ServerId { get; init; }
     
     /// <summary>
+    /// Минимальный уровень заточки
+    /// </summary>
+    public int? MinEnhancementLevel { get; init; }
+
+    /// <summary>
+    /// Максимальный уровень заточки
+    /// </summary>
+    public int? MaxEnhancementLevel { get; init; }
+
+    /// <summary>
+    /// Минимальный опыт при поглощении
+    /// </summary>
+    public int? MinAbsorbExperience { get; init; }
+
+    /// <summary>
+    /// Максимальный опыт при поглощении
+    /// </summary>
+    public int? MaxAbsorbExperience { get; init; }
+
+    /// <summary>
+    /// Поле для сортировки (Price, EnhancementLevel, AttributeValue)
+    /// </summary>
+    public string? SortBy { get; init; }
+
+    /// <summary>
+    /// Направление сортировки (asc, desc)
+    /// </summary>
+    public string? SortDirection { get; init; }
+
+    /// <summary>
+    /// ID атрибута для сортировки по значению (если SortBy = AttributeValue)
+    /// </summary>
+    public int? SortAttributeId { get; init; }
+
+    /// <summary>
     /// Номер страницы (default: 1)
     /// </summary>
     public int PageNumber { get; init; } = 1;
