@@ -9,6 +9,8 @@ using Pw.Hub.Relics.Infrastructure.Data.Seeding;
 using Pw.Hub.Relics.Shared.Helpers;
 using Prometheus;
 using Telegram.Bot;
+using Microsoft.AspNetCore.Diagnostics.HealthChecks;
+using HealthChecks.Prometheus.Metrics;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -95,6 +97,10 @@ builder.Services.AddAuthorization(options =>
 // Controllers
 builder.Services.AddControllers();
 
+// Prometheus - сбор метрик HttpClient
+builder.Services.AddHttpClient(Microsoft.Extensions.Options.Options.DefaultName)
+    .UseHttpClientMetrics();
+
 // Swagger/OpenAPI
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(options =>
@@ -117,6 +123,10 @@ builder.Services.AddCors(options =>
               .AllowAnyHeader();
     });
 });
+
+// Health Checks
+builder.Services.AddHealthChecks()
+    .AddNpgSql(builder.Configuration.GetConnectionString("DefaultConnection")!, name: "PostgreSQL");
 
 var app = builder.Build();
 
@@ -177,6 +187,10 @@ app.UseCors();
 // Prometheus Metrics
 app.UseMetricServer();
 app.UseHttpMetrics();
+
+// Health Checks (стандартные эндпоинты)
+app.MapHealthChecks("/health");
+app.MapHealthChecks("/ready");
 
 app.UseAuthentication();
 app.UseAuthorization();
