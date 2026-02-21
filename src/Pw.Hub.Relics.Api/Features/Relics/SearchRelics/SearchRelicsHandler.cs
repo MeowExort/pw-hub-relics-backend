@@ -25,6 +25,12 @@ public class SearchRelicsHandler : IRequestHandler<SearchRelicsQuery, SearchReli
         var pageNumber = Math.Max(request.PageNumber, 1);
         
         var connection = _dbContext.Database.GetDbConnection();
+        
+        // Открываем соединение, если оно закрыто (требуется для Dapper)
+        if (connection.State != System.Data.ConnectionState.Open)
+        {
+            await connection.OpenAsync(cancellationToken);
+        }
 
         var whereBuilder = new StringBuilder("WHERE rl.is_active = true");
         var parameters = new DynamicParameters();
@@ -70,19 +76,32 @@ public class SearchRelicsHandler : IRequestHandler<SearchRelicsQuery, SearchReli
             {
                 var attr = request.AdditionalAttributes[i];
                 var pId = $"AttrId_{i}";
-                var pMin = $"AttrMin_{i}";
                 
                 // Используем jsonb_to_recordset для поиска значения
-                whereBuilder.Append($@" AND EXISTS (
-                    SELECT 1 
-                    FROM jsonb_to_recordset(rl.json_attributes) as x(""AttributeDefinitionId"" int, ""Value"" int, ""Category"" int) 
-                    WHERE x.""AttributeDefinitionId"" = @{pId} 
-                      AND x.""Category"" = {(int)AttributeCategory.Additional} 
-                      AND (@{pMin} IS NULL OR x.""Value"" >= @{pMin})
-                )");
-                
-                parameters.Add(pId, attr.Id);
-                parameters.Add(pMin, attr.MinValue);
+                // Если MinValue указан, добавляем условие на Value, иначе просто проверяем наличие атрибута
+                if (attr.MinValue.HasValue)
+                {
+                    var pMin = $"AttrMin_{i}";
+                    whereBuilder.Append($@" AND EXISTS (
+                        SELECT 1 
+                        FROM jsonb_to_recordset(rl.json_attributes) as x(""AttributeDefinitionId"" int, ""Value"" int, ""Category"" int) 
+                        WHERE x.""AttributeDefinitionId"" = @{pId} 
+                          AND x.""Category"" = {(int)AttributeCategory.Additional} 
+                          AND x.""Value"" >= @{pMin}
+                    )");
+                    parameters.Add(pId, attr.Id);
+                    parameters.Add(pMin, attr.MinValue.Value);
+                }
+                else
+                {
+                    whereBuilder.Append($@" AND EXISTS (
+                        SELECT 1 
+                        FROM jsonb_to_recordset(rl.json_attributes) as x(""AttributeDefinitionId"" int, ""Value"" int, ""Category"" int) 
+                        WHERE x.""AttributeDefinitionId"" = @{pId} 
+                          AND x.""Category"" = {(int)AttributeCategory.Additional}
+                    )");
+                    parameters.Add(pId, attr.Id);
+                }
             }
         }
 
@@ -195,24 +214,47 @@ public class SearchRelicsHandler : IRequestHandler<SearchRelicsQuery, SearchReli
 
         foreach (var row in rawItems)
         {
-            var jsonAttributes = JsonSerializer.Deserialize<List<DomainRelicAttributeDto>>((string)row.JsonAttributesRaw) ?? new List<DomainRelicAttributeDto>();
+            // PostgreSQL возвращает имена колонок в нижнем регистре
+            var jsonRaw = (string?)row.jsonattributesraw;
+            var jsonAttributes = !string.IsNullOrEmpty(jsonRaw) 
+                ? JsonSerializer.Deserialize<List<DomainRelicAttributeDto>>(jsonRaw) ?? new List<DomainRelicAttributeDto>()
+                : new List<DomainRelicAttributeDto>();
+
             var mainAttr = jsonAttributes.FirstOrDefault(a => a.Category == AttributeCategory.Main);
             var additionalAttrs = jsonAttributes.Where(a => a.Category == AttributeCategory.Additional).ToList();
+
+            // Safe extraction of values from dynamic row (handles DBNull/null)
+            // PostgreSQL возвращает все алиасы в нижнем регистре
+            var relicId = (int)(row.relicid ?? 0);
+            var relicName = (string)(row.relicname ?? "Unknown");
+            var relicSoulLevel = (int)(row.relicsoullevel ?? 0);
+            var relicSoulType = (int)(row.relicsoultype ?? 0);
+            var slotTypeId = (int)(row.slottypeid ?? 0);
+            var slotTypeName = (string)(row.slottypename ?? "Unknown");
+            var relicRace = (int)(row.relicrace ?? 0);
+            var relicIconUri = (string?)row.reliciconuri;
+            var absorbExperience = (int)(row.absorb_experience ?? 0);
+            var enhancementLevel = (int)(row.enhancement_level ?? 0);
+            var price = (long)(row.price ?? 0L);
+            var serverId = (int)(row.serverid ?? 0);
+            var serverName = (string)(row.servername ?? "Unknown");
+            var serverKey = (string)(row.serverkey ?? "Unknown");
+            var createdAt = (DateTime)(row.created_at ?? DateTime.MinValue);
 
             itemDtos.Add(new RelicListingDto
             {
                 Id = row.id,
                 RelicDefinition = new RelicDefinitionDto
                 {
-                    Id = row.RelicId,
-                    Name = row.RelicName,
-                    SoulLevel = row.RelicSoulLevel,
-                    SoulType = row.RelicSoulType,
-                    SlotType = new SlotTypeDto(row.SlotTypeId, row.SlotTypeName),
-                    Race = row.RelicRace,
-                    IconUri = row.RelicIconUri
+                    Id = relicId,
+                    Name = relicName,
+                    SoulLevel = relicSoulLevel,
+                    SoulType = relicSoulType,
+                    SlotType = new SlotTypeDto(slotTypeId, slotTypeName),
+                    Race = relicRace,
+                    IconUri = relicIconUri
                 },
-                AbsorbExperience = row.absorb_experience,
+                AbsorbExperience = absorbExperience,
                 MainAttribute = mainAttr != null
                     ? new RelicAttributeDto
                     {
@@ -233,11 +275,11 @@ public class SearchRelicsHandler : IRequestHandler<SearchRelicsQuery, SearchReli
                         attrDefs.GetValueOrDefault(a.AttributeDefinitionId, "Unknown")),
                     Value = a.Value
                 }).ToList(),
-                EnhancementLevel = row.enhancement_level,
-                Price = row.price,
-                PriceFormatted = PriceHelper.FormatPrice(row.price),
-                Server = new ServerDto(row.ServerId, row.ServerName, row.ServerKey),
-                CreatedAt = row.created_at
+                EnhancementLevel = enhancementLevel,
+                Price = price,
+                PriceFormatted = PriceHelper.FormatPrice(price),
+                Server = new ServerDto(serverId, serverName, serverKey),
+                CreatedAt = createdAt
             });
         }
 
