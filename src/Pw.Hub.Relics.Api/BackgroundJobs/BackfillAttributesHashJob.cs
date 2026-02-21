@@ -43,6 +43,7 @@ public class BackfillAttributesHashJob : BackgroundService
                 var listings = await dbContext.RelicListings
                     .Include(rl => rl.Attributes)
                     .Where(rl => rl.AttributesHash == null)
+                    .OrderBy(rl => rl.Id)
                     .Take(BatchSize)
                     .ToListAsync(stoppingToken);
 
