@@ -169,7 +169,7 @@ public class SearchRelicsHandler : IRequestHandler<SearchRelicsQuery, SearchReli
         {
             sortBuilder.Append($"ORDER BY rl.enhancement_level {sortDirection}, rl.price DESC");
         }
-        else if (sortBy == "attributevalue" && request.SortAttributeId.HasValue)
+        else if ((sortBy == "attributevalue" || sortBy == "attribute") && request.SortAttributeId.HasValue)
         {
             sortBuilder.Append($@"ORDER BY (
                 SELECT (x.""Value"")::int 
