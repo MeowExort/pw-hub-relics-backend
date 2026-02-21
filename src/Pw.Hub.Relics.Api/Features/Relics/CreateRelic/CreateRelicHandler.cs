@@ -44,7 +44,6 @@ public class CreateRelicHandler : IRequestHandler<CreateRelicCommand, CreateReli
 
         // 2. Найти существующий лот по уникальному ключу (продавец + позиция + сервер)
         var existingListing = await _dbContext.RelicListings
-            .Include(rl => rl.Attributes)
             .FirstOrDefaultAsync(rl =>
                 rl.SellerCharacterId == request.SellerCharacterId &&
                 rl.ShopPosition == request.ShopPosition &&
@@ -61,8 +60,7 @@ public class CreateRelicHandler : IRequestHandler<CreateRelicCommand, CreateReli
             existingListing.Price = request.Price;
 
             // Обновить атрибуты
-            _dbContext.RelicAttributes.RemoveRange(existingListing.Attributes);
-            existingListing.Attributes = CreateAttributes(request, existingListing.Id);
+            existingListing.JsonAttributes = CreateAttributesDto(request);
 
             await _dbContext.SaveChangesAsync(cancellationToken);
             return new CreateRelicResult(existingListing.Id, IsUpdated: true);
@@ -81,10 +79,9 @@ public class CreateRelicHandler : IRequestHandler<CreateRelicCommand, CreateReli
             ServerId = request.ServerId,
             CreatedAt = DateTime.UtcNow,
             LastSeenAt = DateTime.UtcNow,
-            IsActive = true
+            IsActive = true,
+            JsonAttributes = CreateAttributesDto(request)
         };
-
-        newListing.Attributes = CreateAttributes(request, newListing.Id);
 
         _dbContext.RelicListings.Add(newListing);
         await _dbContext.SaveChangesAsync(cancellationToken);
@@ -98,32 +95,26 @@ public class CreateRelicHandler : IRequestHandler<CreateRelicCommand, CreateReli
         return new CreateRelicResult(newListing.Id, IsUpdated: false);
     }
 
-    private static List<RelicAttribute> CreateAttributes(CreateRelicCommand request, Guid listingId)
+    private static List<RelicAttributeDto> CreateAttributesDto(CreateRelicCommand request)
     {
-        var attributes = new List<RelicAttribute>
+        var attributes = new List<RelicAttributeDto>
         {
-            new()
-            {
-                Id = Guid.NewGuid(),
-                RelicListingId = listingId,
-                AttributeDefinitionId = request.MainAttribute.AttributeDefinitionId,
-                Value = request.MainAttribute.Value,
-                Category = AttributeCategory.Main
-            }
+            new(
+                request.MainAttribute.AttributeDefinitionId,
+                request.MainAttribute.Value,
+                AttributeCategory.Main
+            )
         };
 
         if (request.AdditionalAttributes != null)
         {
             foreach (var attr in request.AdditionalAttributes)
             {
-                attributes.Add(new RelicAttribute
-                {
-                    Id = Guid.NewGuid(),
-                    RelicListingId = listingId,
-                    AttributeDefinitionId = attr.AttributeDefinitionId,
-                    Value = attr.Value,
-                    Category = AttributeCategory.Additional
-                });
+                attributes.Add(new RelicAttributeDto(
+                    attr.AttributeDefinitionId,
+                    attr.Value,
+                    AttributeCategory.Additional
+                ));
             }
         }
 

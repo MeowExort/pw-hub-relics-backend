@@ -25,9 +25,8 @@ public class SearchRelicsHandler : IRequestHandler<SearchRelicsQuery, SearchReli
             .Include(r => r.RelicDefinition)
                 .ThenInclude(rd => rd.SlotType)
             .Include(r => r.Server)
-            .Include(r => r.Attributes)
-                .ThenInclude(a => a.AttributeDefinition)
             .Where(r => r.IsActive)
+            .AsNoTracking()
             .AsQueryable();
 
         // Применение фильтров
@@ -55,7 +54,7 @@ public class SearchRelicsHandler : IRequestHandler<SearchRelicsQuery, SearchReli
 
         if (request.MainAttributeId.HasValue)
         {
-            query = query.Where(r => r.Attributes.Any(a => 
+            query = query.Where(r => r.JsonAttributes.Any(a => 
                 a.Category == AttributeCategory.Main && 
                 a.AttributeDefinitionId == request.MainAttributeId.Value));
         }
@@ -64,7 +63,7 @@ public class SearchRelicsHandler : IRequestHandler<SearchRelicsQuery, SearchReli
         {
             foreach (var attr in request.AdditionalAttributes)
             {
-                query = query.Where(r => r.Attributes.Any(a => 
+                query = query.Where(r => r.JsonAttributes.Any(a => 
                     a.Category == AttributeCategory.Additional && 
                     a.AttributeDefinitionId == attr.Id &&
                     (!attr.MinValue.HasValue || a.Value >= attr.MinValue.Value)));
@@ -129,14 +128,9 @@ public class SearchRelicsHandler : IRequestHandler<SearchRelicsQuery, SearchReli
         }
         else if (sortBy == "attributevalue" && request.SortAttributeId.HasValue)
         {
-            // Сортировка по значению конкретного дополнительного атрибута
-            // Если у реликвии нет такого атрибута, она будет в конце (или начале в зависимости от направления)
-            // В EF Core это может быть сложно транслировать эффективно без Join, 
-            // но попробуем через проекцию или подзапрос.
-            
             if (sortDirection == "asc")
             {
-                orderedQuery = query.OrderBy(r => r.Attributes
+                orderedQuery = query.OrderBy(r => r.JsonAttributes
                         .Where(a => a.AttributeDefinitionId == request.SortAttributeId.Value && a.Category == AttributeCategory.Additional)
                         .Select(a => (int?)a.Value)
                         .FirstOrDefault() ?? 0)
@@ -144,7 +138,7 @@ public class SearchRelicsHandler : IRequestHandler<SearchRelicsQuery, SearchReli
             }
             else
             {
-                orderedQuery = query.OrderByDescending(r => r.Attributes
+                orderedQuery = query.OrderByDescending(r => r.JsonAttributes
                         .Where(a => a.AttributeDefinitionId == request.SortAttributeId.Value && a.Category == AttributeCategory.Additional)
                         .Select(a => (int?)a.Value)
                         .FirstOrDefault() ?? 0)
@@ -164,11 +158,16 @@ public class SearchRelicsHandler : IRequestHandler<SearchRelicsQuery, SearchReli
             .Take(pageSize)
             .ToListAsync(cancellationToken);
 
+        // Предварительная загрузка всех определений атрибутов для маппинга
+        var attrDefs = await _dbContext.AttributeDefinitions
+            .AsNoTracking()
+            .ToDictionaryAsync(ad => ad.Id, ad => ad.Name, cancellationToken);
+
         // Маппинг в DTO
         var itemDtos = items.Select(r =>
         {
-            var mainAttr = r.Attributes.FirstOrDefault(a => a.Category == AttributeCategory.Main);
-            var additionalAttrs = r.Attributes.Where(a => a.Category == AttributeCategory.Additional).ToList();
+            var mainAttr = r.JsonAttributes.FirstOrDefault(a => a.Category == AttributeCategory.Main);
+            var additionalAttrs = r.JsonAttributes.Where(a => a.Category == AttributeCategory.Additional).ToList();
 
             return new RelicListingDto
             {
@@ -188,8 +187,8 @@ public class SearchRelicsHandler : IRequestHandler<SearchRelicsQuery, SearchReli
                     ? new RelicAttributeDto
                     {
                         AttributeDefinition = new AttributeDefinitionDto(
-                            mainAttr.AttributeDefinition.Id,
-                            mainAttr.AttributeDefinition.Name),
+                            mainAttr.AttributeDefinitionId,
+                            attrDefs.GetValueOrDefault(mainAttr.AttributeDefinitionId, "Unknown")),
                         Value = mainAttr.Value
                     }
                     : new RelicAttributeDto
@@ -200,8 +199,8 @@ public class SearchRelicsHandler : IRequestHandler<SearchRelicsQuery, SearchReli
                 AdditionalAttributes = additionalAttrs.Select(a => new RelicAttributeDto
                 {
                     AttributeDefinition = new AttributeDefinitionDto(
-                        a.AttributeDefinition.Id,
-                        a.AttributeDefinition.Name),
+                        a.AttributeDefinitionId,
+                        attrDefs.GetValueOrDefault(a.AttributeDefinitionId, "Unknown")),
                     Value = a.Value
                 }).ToList(),
                 EnhancementLevel = r.EnhancementLevel,

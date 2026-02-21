@@ -42,7 +42,7 @@ public static class AttributeHashHelper
     /// <summary>
     /// Вычисляет хеш из списка атрибутов (из БД)
     /// </summary>
-    public static string ComputeHashFromAttributes(IEnumerable<RelicAttribute> attributes)
+    public static string ComputeHashFromAttributes(IEnumerable<RelicAttributeDto> attributes)
     {
         var mainAttr = attributes.FirstOrDefault(a => a.Category == AttributeCategory.Main);
         var mainAddon = mainAttr?.AttributeDefinitionId ?? -1;

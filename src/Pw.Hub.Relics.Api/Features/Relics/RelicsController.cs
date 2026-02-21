@@ -7,16 +7,19 @@ using Pw.Hub.Relics.Api.Features.Relics.ParseRelic;
 using Pw.Hub.Relics.Api.Features.Relics.SearchRelics;
 
 namespace Pw.Hub.Relics.Api.Features.Relics;
+using Pw.Hub.Relics.Api.BackgroundJobs;
 
 [ApiController]
 [Route("api/relics")]
 public class RelicsController : ControllerBase
 {
     private readonly IMediator _mediator;
+    private readonly IParseRelicQueue _parseRelicQueue;
 
-    public RelicsController(IMediator mediator)
+    public RelicsController(IMediator mediator, IParseRelicQueue parseRelicQueue)
     {
         _mediator = mediator;
+        _parseRelicQueue = parseRelicQueue;
     }
 
     /// <summary>
@@ -93,7 +96,7 @@ public class RelicsController : ControllerBase
         [FromBody] ParseRelicCommand command,
         CancellationToken cancellationToken)
     {
-        var result = await _mediator.Send(command, cancellationToken);
-        return Ok(result);
+        await _parseRelicQueue.EnqueueAsync(command, cancellationToken);
+        return Accepted(new { message = "Data enqueued for processing" });
     }
 }

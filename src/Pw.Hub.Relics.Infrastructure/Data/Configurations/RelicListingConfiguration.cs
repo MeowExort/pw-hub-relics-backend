@@ -67,6 +67,12 @@ public class RelicListingConfiguration : IEntityTypeConfiguration<RelicListing>
             .HasColumnName("attributes_hash")
             .HasMaxLength(64);
 
+        builder.Property(x => x.JsonAttributes)
+            .HasColumnName("json_attributes")
+            .HasColumnType("jsonb")
+            .HasDefaultValueSql("'[]'::jsonb")
+            .IsRequired();
+
         // Concurrency token using PostgreSQL xmin system column
         builder.Property(x => x.RowVersion)
             .HasColumnName("xmin")
@@ -85,14 +91,14 @@ public class RelicListingConfiguration : IEntityTypeConfiguration<RelicListing>
             .HasForeignKey(x => x.ServerId)
             .OnDelete(DeleteBehavior.Restrict);
 
-        builder.HasMany(x => x.Attributes)
-            .WithOne()
-            .HasForeignKey(x => x.RelicListingId)
-            .OnDelete(DeleteBehavior.Cascade);
-
         // Unique constraint
         builder.HasIndex(x => new { x.SellerCharacterId, x.ShopPosition, x.ServerId, x.RelicDefinitionId })
             .IsUnique();
+
+        // Covering index for optimized lookup
+        builder.HasIndex(x => new { x.ServerId, x.SellerCharacterId, x.ShopPosition })
+            .IncludeProperties(x => new { x.AttributesHash, x.RowVersion })
+            .HasDatabaseName("IX_RelicListings_Lookup_Covering");
 
         // Performance indexes
         builder.HasIndex(x => new { x.IsActive, x.CreatedAt })

@@ -22,8 +22,7 @@ public class GetRelicByIdHandler : IRequestHandler<GetRelicByIdQuery, RelicListi
             .Include(r => r.RelicDefinition)
                 .ThenInclude(rd => rd.SlotType)
             .Include(r => r.Server)
-            .Include(r => r.Attributes)
-                .ThenInclude(a => a.AttributeDefinition)
+            .AsNoTracking()
             .FirstOrDefaultAsync(r => r.Id == request.Id, cancellationToken);
 
         if (relic == null)
@@ -31,8 +30,12 @@ public class GetRelicByIdHandler : IRequestHandler<GetRelicByIdQuery, RelicListi
             return null;
         }
 
-        var mainAttr = relic.Attributes.FirstOrDefault(a => a.Category == AttributeCategory.Main);
-        var additionalAttrs = relic.Attributes.Where(a => a.Category == AttributeCategory.Additional).ToList();
+        var attrDefs = await _dbContext.AttributeDefinitions
+            .AsNoTracking()
+            .ToDictionaryAsync(ad => ad.Id, ad => ad.Name, cancellationToken);
+
+        var mainAttr = relic.JsonAttributes.FirstOrDefault(a => a.Category == AttributeCategory.Main);
+        var additionalAttrs = relic.JsonAttributes.Where(a => a.Category == AttributeCategory.Additional).ToList();
 
         return new RelicListingDto
         {
@@ -52,8 +55,8 @@ public class GetRelicByIdHandler : IRequestHandler<GetRelicByIdQuery, RelicListi
                 ? new RelicAttributeDto
                 {
                     AttributeDefinition = new AttributeDefinitionDto(
-                        mainAttr.AttributeDefinition.Id,
-                        mainAttr.AttributeDefinition.Name),
+                        mainAttr.AttributeDefinitionId,
+                        attrDefs.GetValueOrDefault(mainAttr.AttributeDefinitionId, "Unknown")),
                     Value = mainAttr.Value
                 }
                 : new RelicAttributeDto
@@ -64,8 +67,8 @@ public class GetRelicByIdHandler : IRequestHandler<GetRelicByIdQuery, RelicListi
             AdditionalAttributes = additionalAttrs.Select(a => new RelicAttributeDto
             {
                 AttributeDefinition = new AttributeDefinitionDto(
-                    a.AttributeDefinition.Id,
-                    a.AttributeDefinition.Name),
+                    a.AttributeDefinitionId,
+                    attrDefs.GetValueOrDefault(a.AttributeDefinitionId, "Unknown")),
                 Value = a.Value
             }).ToList(),
             EnhancementLevel = relic.EnhancementLevel,

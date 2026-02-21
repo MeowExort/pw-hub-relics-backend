@@ -6,6 +6,7 @@ using Pw.Hub.Relics.Api.BackgroundJobs;
 using Pw.Hub.Relics.Infrastructure.Data;
 using Pw.Hub.Relics.Infrastructure.Data.Seeding;
 using Pw.Hub.Relics.Shared.Helpers;
+using Prometheus;
 using Telegram.Bot;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -39,6 +40,10 @@ builder.Services.AddSingleton<INotificationProcessor, NotificationProcessorServi
 // Notification Queue (для оптимизированной обработки уведомлений)
 builder.Services.AddSingleton<INotificationQueue, NotificationQueue>();
 builder.Services.AddHostedService<NotificationBackgroundService>();
+
+// Parse Relic Queue (для пакетной обработки парсинга)
+builder.Services.AddSingleton<IParseRelicQueue, ParseRelicQueue>();
+builder.Services.AddHostedService<ParseRelicBackgroundService>();
 
 // Backfill job для заполнения AttributesHash у существующих записей
 builder.Services.AddHostedService<BackfillAttributesHashJob>();
@@ -163,9 +168,17 @@ catch (Exception ex)
 
 app.UseHttpsRedirection();
 app.UseCors();
+
+// Prometheus Metrics
+app.UseMetricServer();
+app.UseHttpMetrics();
+
 app.UseAuthentication();
 app.UseAuthorization();
 app.MapControllers();
+
+// Дополнительный маппинг эндпоинта /metrics (хотя UseMetricServer по умолчанию слушает /metrics)
+app.MapMetrics();
 
 app.Run();
 

@@ -1,3 +1,4 @@
+using System.Text;
 using Microsoft.EntityFrameworkCore;
 using Pw.Hub.Relics.Domain.Entities;
 using Pw.Hub.Relics.Domain.Enums;
@@ -43,7 +44,6 @@ public class NotificationProcessorService : INotificationProcessor
             {
                 listing = await dbContext.RelicListings
                     .Include(r => r.RelicDefinition)
-                    .Include(r => r.Attributes)
                     .FirstOrDefaultAsync(r => r.Id == listing.Id, cancellationToken) ?? listing;
             }
 
@@ -98,7 +98,7 @@ public class NotificationProcessorService : INotificationProcessor
         // Проверка основной характеристики
         if (filter.MainAttributeId.HasValue)
         {
-            var mainAttr = listing.Attributes.FirstOrDefault(a => a.Category == AttributeCategory.Main);
+            var mainAttr = listing.JsonAttributes.FirstOrDefault(a => a.Category == AttributeCategory.Main);
             if (mainAttr == null || mainAttr.AttributeDefinitionId != filter.MainAttributeId.Value)
                 return false;
         }
@@ -106,7 +106,7 @@ public class NotificationProcessorService : INotificationProcessor
         // Проверка дополнительных характеристик
         if (filter.RequiredAdditionalAttributeIds is { Count: > 0 })
         {
-            var additionalAttrIds = listing.Attributes
+            var additionalAttrIds = listing.JsonAttributes
                 .Where(a => a.Category == AttributeCategory.Additional)
                 .Select(a => a.AttributeDefinitionId)
                 .ToHashSet();
@@ -176,29 +176,32 @@ public class NotificationProcessorService : INotificationProcessor
 
     private string BuildNotificationMessage(RelicListing listing)
     {
-        var mainAttr = listing.Attributes.FirstOrDefault(a => a.Category == AttributeCategory.Main);
-        var additionalAttrs = listing.Attributes.Where(a => a.Category == AttributeCategory.Additional).ToList();
+        var mainAttr = listing.JsonAttributes.FirstOrDefault(a => a.Category == AttributeCategory.Main);
+        var additionalAttrs = listing.JsonAttributes.Where(a => a.Category == AttributeCategory.Additional).ToList();
 
-        var message = $"🔔 Новая реликвия!\n\n" +
-                      $"📦 {listing.RelicDefinition.Name}\n" +
-                      $"💰 Цена: {PriceHelper.FormatPrice(listing.Price)}\n" +
-                      $"⚡ Заточка: +{listing.EnhancementLevel}\n" +
-                      $"🔮 Опыт: {listing.AbsorbExperience}";
+        var message = new StringBuilder();
+        message.AppendLine("🔔 Новая реликвия!");
+        message.AppendLine();
+        message.AppendLine($"📦 {listing.RelicDefinition.Name}");
+        message.AppendLine($"💰 Цена: {PriceHelper.FormatPrice(listing.Price)}");
+        message.AppendLine($"⚡ Заточка: +{listing.EnhancementLevel}");
+        message.AppendLine($"🔮 Опыт: {listing.AbsorbExperience}");
 
         if (mainAttr != null)
         {
-            message += $"\n\n📊 Основная: ID {mainAttr.AttributeDefinitionId} = {mainAttr.Value}";
+            message.AppendLine();
+            message.AppendLine($"📊 Основная: ID {mainAttr.AttributeDefinitionId} = {mainAttr.Value}");
         }
 
         if (additionalAttrs.Count > 0)
         {
-            message += "\n📈 Дополнительные:";
+            message.AppendLine("📈 Дополнительные:");
             foreach (var attr in additionalAttrs)
             {
-                message += $"\n  • ID {attr.AttributeDefinitionId} = {attr.Value}";
+                message.AppendLine($"  • ID {attr.AttributeDefinitionId} = {attr.Value}");
             }
         }
 
-        return message;
+        return message.ToString();
     }
 }

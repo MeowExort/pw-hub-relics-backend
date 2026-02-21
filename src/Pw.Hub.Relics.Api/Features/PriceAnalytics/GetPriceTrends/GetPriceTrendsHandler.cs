@@ -22,9 +22,8 @@ public class GetPriceTrendsHandler : IRequestHandler<GetPriceTrendsQuery, GetPri
 
         var query = _dbContext.RelicListings
             .Include(r => r.RelicDefinition)
-            .Include(r => r.Attributes)
-                .ThenInclude(a => a.AttributeDefinition)
             .Where(r => r.CreatedAt >= request.StartDate && r.CreatedAt <= endDate)
+            .AsNoTracking()
             .AsQueryable();
 
         // Применение фильтров
@@ -51,7 +50,7 @@ public class GetPriceTrendsHandler : IRequestHandler<GetPriceTrendsQuery, GetPri
 
         if (request.MainAttribute != null)
         {
-            query = query.Where(r => r.Attributes.Any(a =>
+            query = query.Where(r => r.JsonAttributes.Any(a =>
                 a.Category == AttributeCategory.Main &&
                 a.AttributeDefinitionId == request.MainAttribute.Id &&
                 (!request.MainAttribute.MinValue.HasValue || a.Value >= request.MainAttribute.MinValue.Value) &&
@@ -62,7 +61,7 @@ public class GetPriceTrendsHandler : IRequestHandler<GetPriceTrendsQuery, GetPri
         {
             foreach (var attrFilter in request.AdditionalAttributes)
             {
-                query = query.Where(r => r.Attributes.Any(a =>
+                query = query.Where(r => r.JsonAttributes.Any(a =>
                     a.Category == AttributeCategory.Additional &&
                     a.AttributeDefinitionId == attrFilter.Id &&
                     (!attrFilter.MinValue.HasValue || a.Value >= attrFilter.MinValue.Value) &&

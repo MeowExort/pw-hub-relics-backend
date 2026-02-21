@@ -54,8 +54,8 @@ public class RefreshPriceHistoryJob : BackgroundService
 
         // Получить все активные лоты за последние 3 месяца с их атрибутами
         var listings = await dbContext.RelicListings
-            .Include(r => r.Attributes)
             .Where(r => r.CreatedAt >= threeMonthAgo)
+            .AsNoTracking()
             .ToListAsync(cancellationToken);
 
         // Удалить старые записи истории цен
@@ -77,10 +77,10 @@ public class RefreshPriceHistoryJob : BackgroundService
 
         foreach (var listing in listings)
         {
-            var mainAttr = listing.Attributes.FirstOrDefault(a => a.Category == AttributeCategory.Main);
+            var mainAttr = listing.JsonAttributes.FirstOrDefault(a => a.Category == AttributeCategory.Main);
             if (mainAttr == null) continue;
 
-            var additionalAttrIds = listing.Attributes
+            var additionalAttrIds = listing.JsonAttributes
                 .Where(a => a.Category == AttributeCategory.Additional)
                 .Select(a => a.AttributeDefinitionId)
                 .OrderBy(id => id)

@@ -16,9 +16,9 @@ public class RelicListing
     public int AbsorbExperience { get; set; }
     
     /// <summary>
-    /// Все характеристики (основная + дополнительные)
+    /// Характеристики в формате JSONB для оптимизации
     /// </summary>
-    public List<RelicAttribute> Attributes { get; set; } = new();
+    public List<RelicAttributeDto> JsonAttributes { get; set; } = new();
     
     /// <summary>
     /// Уровень заточки

@@ -15,7 +15,6 @@ public class RelicsDbContext : DbContext
     public DbSet<EnhancementCurve> EnhancementCurves => Set<EnhancementCurve>();
     public DbSet<RelicDefinition> RelicDefinitions => Set<RelicDefinition>();
     public DbSet<RelicListing> RelicListings => Set<RelicListing>();
-    public DbSet<RelicAttribute> RelicAttributes => Set<RelicAttribute>();
     public DbSet<NotificationFilter> NotificationFilters => Set<NotificationFilter>();
     public DbSet<PriceHistory> PriceHistories => Set<PriceHistory>();
     public DbSet<TelegramBinding> TelegramBindings => Set<TelegramBinding>();

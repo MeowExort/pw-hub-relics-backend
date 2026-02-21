@@ -70,9 +70,9 @@ public class ParseRelicHandler : IRequestHandler<ParseRelicCommand, ParseRelicRe
         {
             try
             {
-                // Используем транзакцию с RepeatableRead для консистентности
+                // Используем транзакцию с ReadCommitted для снижения конфликтов
                 await using var transaction = await _dbContext.Database
-                    .BeginTransactionAsync(IsolationLevel.RepeatableRead, cancellationToken);
+                    .BeginTransactionAsync(IsolationLevel.ReadCommitted, cancellationToken);
 
                 try
                 {
@@ -88,7 +88,6 @@ public class ParseRelicHandler : IRequestHandler<ParseRelicCommand, ParseRelicRe
 
                     // Задача 1: Batch-загрузка существующих листингов
                     var existingListings = await _dbContext.RelicListings
-                        .Include(rl => rl.Attributes)
                         .Where(rl => rl.ServerId == server.Id && sellerIds.Contains(rl.SellerCharacterId))
                         .ToListAsync(cancellationToken);
 
@@ -131,14 +130,7 @@ public class ParseRelicHandler : IRequestHandler<ParseRelicCommand, ParseRelicRe
                             if (existingListing.AttributesHash != incomingHash)
                             {
                                 existingListing.AttributesHash = incomingHash;
-                                // Удаляем старые атрибуты напрямую в базе (без concurrency проверки)
-                                await _dbContext.RelicAttributes
-                                    .Where(a => a.RelicListingId == existingListing.Id)
-                                    .ExecuteDeleteAsync(cancellationToken);
-
-                                // Очищаем коллекцию в памяти и создаём новые атрибуты
-                                existingListing.Attributes.Clear();
-                                existingListing.Attributes = CreateAttributes(lot.relic_item, relicDefinition, existingListing.Id, _logger);
+                                existingListing.JsonAttributes = CreateAttributesDto(lot.relic_item, relicDefinition, _logger);
                             }
 
                             updatedCount++;
@@ -159,10 +151,9 @@ public class ParseRelicHandler : IRequestHandler<ParseRelicCommand, ParseRelicRe
                                 CreatedAt = DateTime.UtcNow,
                                 LastSeenAt = DateTime.UtcNow,
                                 IsActive = true,
-                                AttributesHash = incomingHash
+                                AttributesHash = incomingHash,
+                                JsonAttributes = CreateAttributesDto(lot.relic_item, relicDefinition, _logger)
                             };
-
-                            newListing.Attributes = CreateAttributes(lot.relic_item, relicDefinition, newListing.Id, _logger);
 
                             _dbContext.RelicListings.Add(newListing);
                             newListings.Add(newListing);
@@ -176,29 +167,37 @@ public class ParseRelicHandler : IRequestHandler<ParseRelicCommand, ParseRelicRe
                     // Успешно - выходим из цикла retry
                     break;
                 }
+                catch (DbUpdateConcurrencyException) when (attempt < maxRetries)
+                {
+                    await transaction.RollbackAsync(cancellationToken);
+                    _logger.LogWarning(
+                        "[ParseRelic] Concurrency conflict on attempt {Attempt}/{MaxRetries}. Retrying...",
+                        attempt, maxRetries);
+
+                    // Экспоненциальная задержка перед повторной попыткой
+                    await Task.Delay(50 * attempt, cancellationToken);
+                }
+                catch (Npgsql.PostgresException ex) when (ex.SqlState == "40001" && attempt < maxRetries)
+                {
+                    await transaction.RollbackAsync(cancellationToken);
+                    // Serialization failure - retry
+                    _logger.LogWarning(
+                        "[ParseRelic] Serialization failure on attempt {Attempt}/{MaxRetries}. Retrying...",
+                        attempt, maxRetries);
+
+                    await Task.Delay(50 * attempt, cancellationToken);
+                }
                 catch
                 {
                     await transaction.RollbackAsync(cancellationToken);
                     throw;
                 }
             }
-            catch (DbUpdateConcurrencyException) when (attempt < maxRetries)
+            catch (Exception ex) when (ex is not DbUpdateConcurrencyException && 
+                                     !(ex is Npgsql.PostgresException pgEx && pgEx.SqlState == "40001"))
             {
-                _logger.LogWarning(
-                    "[ParseRelic] Concurrency conflict on attempt {Attempt}/{MaxRetries}. Retrying...",
-                    attempt, maxRetries);
-
-                // Экспоненциальная задержка перед повторной попыткой
-                await Task.Delay(50 * attempt, cancellationToken);
-            }
-            catch (Npgsql.PostgresException ex) when (ex.SqlState == "40001" && attempt < maxRetries)
-            {
-                // Serialization failure - retry
-                _logger.LogWarning(
-                    "[ParseRelic] Serialization failure on attempt {Attempt}/{MaxRetries}. Retrying...",
-                    attempt, maxRetries);
-
-                await Task.Delay(50 * attempt, cancellationToken);
+                // Если мы здесь, значит это либо последняя попытка, либо критическая ошибка
+                throw;
             }
         }
 
@@ -299,13 +298,12 @@ public class ParseRelicHandler : IRequestHandler<ParseRelicCommand, ParseRelicRe
         return result;
     }
 
-    private static List<RelicAttribute> CreateAttributes(
+    private static List<RelicAttributeDto> CreateAttributesDto(
         Relic relic, 
         RelicDefinition relicDefinition, 
-        Guid listingId,
         ILogger logger)
     {
-        var attributes = new List<RelicAttribute>();
+        var attributes = new List<RelicAttributeDto>();
 
         // Основной атрибут
         if (relic.main_addon >= 0)
@@ -313,18 +311,15 @@ public class ParseRelicHandler : IRequestHandler<ParseRelicCommand, ParseRelicRe
             var attributeId = AddonMapping.GetRelicAttributeType(relic.main_addon);
             if (attributeId.HasValue)
             {
-                attributes.Add(new RelicAttribute
-                {
-                    Id = Guid.NewGuid(),
-                    RelicListingId = listingId,
-                    AttributeDefinitionId = attributeId.Value,
-                    Value = RelicHelper.GetMainAddonValue(
+                attributes.Add(new RelicAttributeDto(
+                    attributeId.Value,
+                    RelicHelper.GetMainAddonValue(
                         relic.main_addon, 
                         relic.exp, 
                         relicDefinition.SoulLevel, 
                         relicDefinition.MainAttributeScaling),
-                    Category = AttributeCategory.Main
-                });
+                    AttributeCategory.Main
+                ));
             }
             else
             {
@@ -335,17 +330,16 @@ public class ParseRelicHandler : IRequestHandler<ParseRelicCommand, ParseRelicRe
         // Дополнительные атрибуты
         foreach (var addon in relic.addons)
         {
+            if (addon.id == 0)
+                continue;
             var attributeId = AddonMapping.GetRelicAttributeType(addon.id);
             if (attributeId.HasValue)
             {
-                attributes.Add(new RelicAttribute
-                {
-                    Id = Guid.NewGuid(),
-                    RelicListingId = listingId,
-                    AttributeDefinitionId = attributeId.Value,
-                    Value = EquipmentAddonHelper.GetAddonValue(addon.id, addon.value),
-                    Category = AttributeCategory.Additional
-                });
+                attributes.Add(new RelicAttributeDto(
+                    attributeId.Value,
+                    EquipmentAddonHelper.GetAddonValue(addon.id, addon.value),
+                    AttributeCategory.Additional
+                ));
             }
             else
             {

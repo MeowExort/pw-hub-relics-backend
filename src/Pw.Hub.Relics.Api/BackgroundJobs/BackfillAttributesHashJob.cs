@@ -41,7 +41,6 @@ public class BackfillAttributesHashJob : BackgroundService
             {
                 // Загружаем пачку записей без хеша
                 var listings = await dbContext.RelicListings
-                    .Include(rl => rl.Attributes)
                     .Where(rl => rl.AttributesHash == null)
                     .OrderBy(rl => rl.Id)
                     .Take(BatchSize)
@@ -55,7 +54,7 @@ public class BackfillAttributesHashJob : BackgroundService
 
                 foreach (var listing in listings)
                 {
-                    listing.AttributesHash = AttributeHashHelper.ComputeHashFromAttributes(listing.Attributes);
+                    listing.AttributesHash = AttributeHashHelper.ComputeHashFromAttributes(listing.JsonAttributes);
                 }
 
                 await dbContext.SaveChangesAsync(stoppingToken);

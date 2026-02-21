@@ -104,27 +104,23 @@ public class SeedingController : ControllerBase
                     CreatedAt = DateTime.UtcNow.AddMinutes(-_random.Next(1, 10000)),
                     LastSeenAt = DateTime.UtcNow,
                     IsActive = true,
-                    Attributes = new List<RelicAttribute>()
+                    JsonAttributes = new List<RelicAttributeDto>()
                 };
 
                 // Добавляем атрибуты
-                listing.Attributes.Add(new RelicAttribute
-                {
-                    Id = Guid.NewGuid(),
-                    AttributeDefinitionId = mainAttrDef.Id,
-                    Value = _random.Next(10, 100), // Рандомное значение
-                    Category = AttributeCategory.Main
-                });
+                listing.JsonAttributes.Add(new RelicAttributeDto(
+                    mainAttrDef.Id,
+                    _random.Next(10, 100), // Рандомное значение
+                    AttributeCategory.Main
+                ));
 
                 foreach (var attr in additionalAttrs)
                 {
-                    listing.Attributes.Add(new RelicAttribute
-                    {
-                        Id = Guid.NewGuid(),
-                        AttributeDefinitionId = attr.Id,
-                        Value = _random.Next(5, 50),
-                        Category = AttributeCategory.Additional
-                    });
+                    listing.JsonAttributes.Add(new RelicAttributeDto(
+                        attr.Id,
+                        _random.Next(5, 50),
+                        AttributeCategory.Additional
+                    ));
                 }
 
                 listings.Add(listing);
