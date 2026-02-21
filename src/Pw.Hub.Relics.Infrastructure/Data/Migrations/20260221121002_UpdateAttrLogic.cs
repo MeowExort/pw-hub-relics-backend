@@ -27,7 +27,7 @@ namespace Pw.Hub.Relics.Infrastructure.Migrations
                 name: "IX_RelicListings_Lookup_Covering",
                 table: "relic_listings",
                 columns: new[] { "server_id", "seller_character_id", "shop_position" })
-                .Annotation("Npgsql:IndexInclude", new[] { "attributes_hash", "xmin" });
+                .Annotation("Npgsql:IndexInclude", new[] { "attributes_hash" });
         }
 
         /// <inheritdoc />

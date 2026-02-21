@@ -97,7 +97,7 @@ public class RelicListingConfiguration : IEntityTypeConfiguration<RelicListing>
 
         // Covering index for optimized lookup
         builder.HasIndex(x => new { x.ServerId, x.SellerCharacterId, x.ShopPosition })
-            .IncludeProperties(x => new { x.AttributesHash, x.RowVersion })
+            .IncludeProperties(x => new { x.AttributesHash })
             .HasDatabaseName("IX_RelicListings_Lookup_Covering");
 
         // Performance indexes

@@ -2,6 +2,7 @@ using FluentValidation;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
+using Npgsql;
 using Pw.Hub.Relics.Api.BackgroundJobs;
 using Pw.Hub.Relics.Infrastructure.Data;
 using Pw.Hub.Relics.Infrastructure.Data.Seeding;
@@ -12,8 +13,12 @@ using Telegram.Bot;
 var builder = WebApplication.CreateBuilder(args);
 
 // Database
+var dataSourceBuilder = new NpgsqlDataSourceBuilder(builder.Configuration.GetConnectionString("DefaultConnection"));
+dataSourceBuilder.EnableDynamicJson();
+var dataSource = dataSourceBuilder.Build();
+
 builder.Services.AddDbContext<RelicsDbContext>(options =>
-    options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
+    options.UseNpgsql(dataSource));
 
 // MediatR
 builder.Services.AddMediatR(cfg => 

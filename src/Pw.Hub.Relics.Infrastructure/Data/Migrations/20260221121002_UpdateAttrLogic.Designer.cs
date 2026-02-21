@@ -490,7 +490,7 @@ namespace Pw.Hub.Relics.Infrastructure.Migrations
                     b.HasIndex("ServerId", "SellerCharacterId", "ShopPosition")
                         .HasDatabaseName("IX_RelicListings_Lookup_Covering");
 
-                    NpgsqlIndexBuilderExtensions.IncludeProperties(b.HasIndex("ServerId", "SellerCharacterId", "ShopPosition"), new[] { "AttributesHash", "RowVersion" });
+                    NpgsqlIndexBuilderExtensions.IncludeProperties(b.HasIndex("ServerId", "SellerCharacterId", "ShopPosition"), new[] { "AttributesHash" });
 
                     b.HasIndex("SellerCharacterId", "ShopPosition", "ServerId", "RelicDefinitionId")
                         .IsUnique();
