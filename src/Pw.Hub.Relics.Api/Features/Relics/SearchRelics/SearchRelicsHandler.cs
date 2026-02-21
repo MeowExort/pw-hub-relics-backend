@@ -147,6 +147,19 @@ public class SearchRelicsHandler : IRequestHandler<SearchRelicsQuery, SearchReli
             parameters.Add("MaxAbsorbExperience", request.MaxAbsorbExperience.Value);
         }
 
+        // Если указана сортировка по атрибуту, фильтруем только реликвии с этим атрибутом
+        var sortBy = request.SortBy?.ToLower();
+        if ((sortBy == "attributevalue" || sortBy == "attribute") && request.SortAttributeId.HasValue)
+        {
+            whereBuilder.Append($@" AND EXISTS (
+                SELECT 1 
+                FROM jsonb_to_recordset(rl.json_attributes) as x(""AttributeDefinitionId"" int, ""Value"" int, ""Category"" int) 
+                WHERE x.""AttributeDefinitionId"" = @SortAttributeId 
+                  AND x.""Category"" = {(int)AttributeCategory.Additional}
+            )");
+            parameters.Add("SortAttributeId", request.SortAttributeId.Value);
+        }
+
         // Подсчет общего количества
         var countSql = $@"
             SELECT COUNT(*) 
@@ -159,7 +172,6 @@ public class SearchRelicsHandler : IRequestHandler<SearchRelicsQuery, SearchReli
         // Сортировка
         var sortBuilder = new StringBuilder();
         var sortDirection = request.SortDirection?.ToLower() == "asc" ? "ASC" : "DESC";
-        var sortBy = request.SortBy?.ToLower();
 
         if (sortBy == "price")
         {
@@ -169,6 +181,18 @@ public class SearchRelicsHandler : IRequestHandler<SearchRelicsQuery, SearchReli
         {
             sortBuilder.Append($"ORDER BY rl.enhancement_level {sortDirection}, rl.price DESC");
         }
+        else if (sortBy == "absorbexperience")
+        {
+            sortBuilder.Append($"ORDER BY rl.absorb_experience {sortDirection}, rl.price DESC");
+        }
+        else if (sortBy == "createdat")
+        {
+            sortBuilder.Append($"ORDER BY rl.created_at {sortDirection}, rl.price DESC");
+        }
+        else if (sortBy == "soullevel")
+        {
+            sortBuilder.Append($"ORDER BY rd.soul_level {sortDirection}, rl.price DESC");
+        }
         else if ((sortBy == "attributevalue" || sortBy == "attribute") && request.SortAttributeId.HasValue)
         {
             sortBuilder.Append($@"ORDER BY (
@@ -177,7 +201,6 @@ public class SearchRelicsHandler : IRequestHandler<SearchRelicsQuery, SearchReli
                 WHERE x.""AttributeDefinitionId"" = @SortAttributeId AND x.""Category"" = {(int)AttributeCategory.Additional}
                 LIMIT 1
             ) {sortDirection}, rl.price DESC");
-            parameters.Add("SortAttributeId", request.SortAttributeId.Value);
         }
         else
         {
