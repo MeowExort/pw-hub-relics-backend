@@ -55,6 +55,9 @@ builder.Services.AddHostedService<ParseRelicBackgroundService>();
 // Backfill job для заполнения AttributesHash у существующих записей
 builder.Services.AddHostedService<BackfillAttributesHashJob>();
 
+// Prometheus Metrics Job
+builder.Services.AddHostedService<MetricsBackgroundService>();
+
 // Authentication (OpenID Connect / JWT Bearer)
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
