@@ -1,7 +1,10 @@
+using Dapper;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
 using Pw.Hub.Relics.Domain.Enums;
 using Pw.Hub.Relics.Infrastructure.Data;
+using System.Text;
+using System.Text.Json;
 
 namespace Pw.Hub.Relics.Api.Features.PriceAnalytics.GetPriceTrends;
 
@@ -24,59 +27,143 @@ public class GetPriceTrendsHandler : IRequestHandler<GetPriceTrendsQuery, GetPri
         var maxEndDate = startDate.AddMonths(1);
         var endDate = requestEndDate > maxEndDate ? maxEndDate : requestEndDate;
 
-        var query = _dbContext.RelicListings
-            .Include(r => r.RelicDefinition)
-            .Where(r => r.CreatedAt >= startDate && r.CreatedAt <= endDate)
-            .AsNoTracking()
-            .AsQueryable();
+        var connection = _dbContext.Database.GetDbConnection();
+        
+        // Открываем соединение, если оно закрыто (требуется для Dapper)
+        if (connection.State != System.Data.ConnectionState.Open)
+        {
+            await connection.OpenAsync(cancellationToken);
+        }
+
+        var whereBuilder = new StringBuilder("WHERE rl.created_at >= @StartDate AND rl.created_at <= @EndDate");
+        var parameters = new DynamicParameters();
+        parameters.Add("StartDate", startDate);
+        parameters.Add("EndDate", endDate);
 
         // Применение фильтров
         if (request.RelicDefinitionId.HasValue)
         {
-            query = query.Where(r => r.RelicDefinitionId == request.RelicDefinitionId.Value);
+            whereBuilder.Append(" AND rl.relic_definition_id = @RelicDefinitionId");
+            parameters.Add("RelicDefinitionId", request.RelicDefinitionId.Value);
         }
 
         if (request.SoulLevel.HasValue)
         {
-            query = query.Where(r => r.RelicDefinition.SoulLevel == request.SoulLevel.Value);
+            whereBuilder.Append(" AND rd.soul_level = @SoulLevel");
+            parameters.Add("SoulLevel", request.SoulLevel.Value);
         }
 
         if (request.SoulType.HasValue)
         {
-            var soulType = (SoulType)request.SoulType.Value;
-            query = query.Where(r => r.RelicDefinition.SoulType == soulType);
+            whereBuilder.Append(" AND rd.soul_type = @SoulType");
+            parameters.Add("SoulType", request.SoulType.Value);
         }
 
         if (request.ServerId.HasValue)
         {
-            query = query.Where(r => r.ServerId == request.ServerId.Value);
+            whereBuilder.Append(" AND rl.server_id = @ServerId");
+            parameters.Add("ServerId", request.ServerId.Value);
         }
 
         if (request.MainAttribute != null)
         {
-            query = query.Where(r => r.JsonAttributes.Any(a =>
-                a.Category == AttributeCategory.Main &&
-                a.AttributeDefinitionId == request.MainAttribute.Id &&
-                (!request.MainAttribute.MinValue.HasValue || a.Value >= request.MainAttribute.MinValue.Value) &&
-                (!request.MainAttribute.MaxValue.HasValue || a.Value <= request.MainAttribute.MaxValue.Value)));
+            var hasMinValue = request.MainAttribute.MinValue.HasValue;
+            var hasMaxValue = request.MainAttribute.MaxValue.HasValue;
+            
+            if (hasMinValue || hasMaxValue)
+            {
+                var conditions = new StringBuilder();
+                conditions.Append($@"EXISTS (
+                    SELECT 1 
+                    FROM jsonb_to_recordset(rl.json_attributes) as x(""AttributeDefinitionId"" int, ""Value"" int, ""Category"" int) 
+                    WHERE x.""AttributeDefinitionId"" = @MainAttrId 
+                      AND x.""Category"" = {(int)AttributeCategory.Main}");
+                
+                if (hasMinValue)
+                {
+                    conditions.Append(" AND x.\"Value\" >= @MainAttrMinValue");
+                    parameters.Add("MainAttrMinValue", request.MainAttribute.MinValue!.Value);
+                }
+                if (hasMaxValue)
+                {
+                    conditions.Append(" AND x.\"Value\" <= @MainAttrMaxValue");
+                    parameters.Add("MainAttrMaxValue", request.MainAttribute.MaxValue!.Value);
+                }
+                conditions.Append(")");
+                
+                whereBuilder.Append(" AND ");
+                whereBuilder.Append(conditions);
+                parameters.Add("MainAttrId", request.MainAttribute.Id);
+            }
+            else
+            {
+                // Просто проверяем наличие атрибута
+                whereBuilder.Append(" AND rl.json_attributes @> @MainAttrJson::jsonb");
+                var mainAttrJson = JsonSerializer.Serialize(new[] 
+                { 
+                    new { AttributeDefinitionId = request.MainAttribute.Id, Category = (int)AttributeCategory.Main } 
+                });
+                parameters.Add("MainAttrJson", mainAttrJson);
+            }
         }
 
         if (request.AdditionalAttributes is { Count: > 0 })
         {
-            foreach (var attrFilter in request.AdditionalAttributes)
+            for (int i = 0; i < request.AdditionalAttributes.Count; i++)
             {
-                query = query.Where(r => r.JsonAttributes.Any(a =>
-                    a.Category == AttributeCategory.Additional &&
-                    a.AttributeDefinitionId == attrFilter.Id &&
-                    (!attrFilter.MinValue.HasValue || a.Value >= attrFilter.MinValue.Value) &&
-                    (!attrFilter.MaxValue.HasValue || a.Value <= attrFilter.MaxValue.Value)));
+                var attr = request.AdditionalAttributes[i];
+                var pId = $"AttrId_{i}";
+                var hasMinValue = attr.MinValue.HasValue;
+                var hasMaxValue = attr.MaxValue.HasValue;
+                
+                if (hasMinValue || hasMaxValue)
+                {
+                    var conditions = new StringBuilder();
+                    conditions.Append($@"EXISTS (
+                        SELECT 1 
+                        FROM jsonb_to_recordset(rl.json_attributes) as x(""AttributeDefinitionId"" int, ""Value"" int, ""Category"" int) 
+                        WHERE x.""AttributeDefinitionId"" = @{pId} 
+                          AND x.""Category"" = {(int)AttributeCategory.Additional}");
+                    
+                    if (hasMinValue)
+                    {
+                        var pMin = $"AttrMin_{i}";
+                        conditions.Append($" AND x.\"Value\" >= @{pMin}");
+                        parameters.Add(pMin, attr.MinValue!.Value);
+                    }
+                    if (hasMaxValue)
+                    {
+                        var pMax = $"AttrMax_{i}";
+                        conditions.Append($" AND x.\"Value\" <= @{pMax}");
+                        parameters.Add(pMax, attr.MaxValue!.Value);
+                    }
+                    conditions.Append(")");
+                    
+                    whereBuilder.Append(" AND ");
+                    whereBuilder.Append(conditions);
+                }
+                else
+                {
+                    whereBuilder.Append($@" AND EXISTS (
+                        SELECT 1 
+                        FROM jsonb_to_recordset(rl.json_attributes) as x(""AttributeDefinitionId"" int, ""Value"" int, ""Category"" int) 
+                        WHERE x.""AttributeDefinitionId"" = @{pId} 
+                          AND x.""Category"" = {(int)AttributeCategory.Additional}
+                    )");
+                }
+                parameters.Add(pId, attr.Id);
             }
         }
 
-        // Получение данных
-        var listings = await query
-            .Select(r => new ListingPriceData(r.Price, r.CreatedAt))
-            .ToListAsync(cancellationToken);
+        // Основной запрос
+        var sql = $@"
+            SELECT rl.price, rl.created_at
+            FROM relic_listings rl
+            JOIN relic_definitions rd ON rl.relic_definition_id = rd.id
+            {whereBuilder}";
+
+        var rawListings = await connection.QueryAsync<ListingPriceData>(sql, parameters);
+        var listings = rawListings.ToList();
 
         if (listings.Count == 0)
         {
@@ -143,7 +230,14 @@ public class GetPriceTrendsHandler : IRequestHandler<GetPriceTrendsQuery, GetPri
             .ToList();
     }
 
-    private record ListingPriceData(long Price, DateTime CreatedAt);
+    private class ListingPriceData
+    {
+        public long Price { get; set; }
+        public DateTime Created_At { get; set; }
+        
+        // Alias for cleaner code access
+        public DateTime CreatedAt => Created_At;
+    }
 
     private static DateTime GetStartOfWeek(DateTime date)
     {
