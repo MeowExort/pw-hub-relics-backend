@@ -54,19 +54,22 @@ public class SearchRelicsHandler : IRequestHandler<SearchRelicsQuery, SearchReli
 
         if (request.MainAttributeId.HasValue)
         {
+            var mainAttrId = request.MainAttributeId.Value;
             query = query.Where(r => r.JsonAttributes.Any(a => 
-                a.Category == AttributeCategory.Main && 
-                a.AttributeDefinitionId == request.MainAttributeId.Value));
+                (int)a.Category == (int)AttributeCategory.Main && 
+                a.AttributeDefinitionId == mainAttrId));
         }
 
         if (request.AdditionalAttributes is { Count: > 0 })
         {
             foreach (var attr in request.AdditionalAttributes)
             {
+                var attrId = attr.Id;
+                var attrMinValue = attr.MinValue;
                 query = query.Where(r => r.JsonAttributes.Any(a => 
-                    a.Category == AttributeCategory.Additional && 
-                    a.AttributeDefinitionId == attr.Id &&
-                    (!attr.MinValue.HasValue || a.Value >= attr.MinValue.Value)));
+                    (int)a.Category == (int)AttributeCategory.Additional && 
+                    a.AttributeDefinitionId == attrId &&
+                    (!attrMinValue.HasValue || a.Value >= attrMinValue.Value)));
             }
         }
 
@@ -128,10 +131,12 @@ public class SearchRelicsHandler : IRequestHandler<SearchRelicsQuery, SearchReli
         }
         else if (sortBy == "attributevalue" && request.SortAttributeId.HasValue)
         {
+            var sortAttrId = request.SortAttributeId.Value;
+            var additionalCategory = (int)AttributeCategory.Additional;
             if (sortDirection == "asc")
             {
                 orderedQuery = query.OrderBy(r => r.JsonAttributes
-                        .Where(a => a.AttributeDefinitionId == request.SortAttributeId.Value && a.Category == AttributeCategory.Additional)
+                        .Where(a => (int)a.Category == additionalCategory && a.AttributeDefinitionId == sortAttrId)
                         .Select(a => (int?)a.Value)
                         .FirstOrDefault() ?? 0)
                     .ThenByDescending(r => r.Price);
@@ -139,7 +144,7 @@ public class SearchRelicsHandler : IRequestHandler<SearchRelicsQuery, SearchReli
             else
             {
                 orderedQuery = query.OrderByDescending(r => r.JsonAttributes
-                        .Where(a => a.AttributeDefinitionId == request.SortAttributeId.Value && a.Category == AttributeCategory.Additional)
+                        .Where(a => (int)a.Category == additionalCategory && a.AttributeDefinitionId == sortAttrId)
                         .Select(a => (int?)a.Value)
                         .FirstOrDefault() ?? 0)
                     .ThenByDescending(r => r.Price);
