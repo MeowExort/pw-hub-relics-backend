@@ -1,7 +1,7 @@
 using System.Security.Claims;
-using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Pw.Hub.Relics.Api.Helpers;
 using Pw.Hub.Relics.Domain.Entities;
 using Pw.Hub.Relics.Domain.Enums;
 using Pw.Hub.Relics.Infrastructure.Data;
@@ -10,7 +10,7 @@ namespace Pw.Hub.Relics.Api.Features.Notifications;
 
 [ApiController]
 [Route("api/notifications/filters")]
-[Authorize(Policy = "UserPolicy")]
+[ApiKeyAuth]
 public class NotificationsController : ControllerBase
 {
     private readonly RelicsDbContext _dbContext;

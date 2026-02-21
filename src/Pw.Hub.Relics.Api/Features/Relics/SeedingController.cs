@@ -1,6 +1,6 @@
-using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Pw.Hub.Relics.Api.Helpers;
 using Pw.Hub.Relics.Domain.Entities;
 using Pw.Hub.Relics.Domain.Enums;
 using Pw.Hub.Relics.Infrastructure.Data;
@@ -9,6 +9,7 @@ namespace Pw.Hub.Relics.Api.Features.Relics;
 
 [ApiController]
 [Route("api/relics/seed")]
+[ApiKeyAuth]
 public class SeedingController : ControllerBase
 {
     private readonly RelicsDbContext _context;
@@ -20,7 +21,6 @@ public class SeedingController : ControllerBase
     }
 
     [HttpPost("market")]
-    [AllowAnonymous] // Для удобства тестирования, можно изменить на [Authorize]
     public async Task<IActionResult> SeedMarket(CancellationToken cancellationToken)
     {
         var servers = await _context.ServerDefinitions.ToListAsync(cancellationToken);

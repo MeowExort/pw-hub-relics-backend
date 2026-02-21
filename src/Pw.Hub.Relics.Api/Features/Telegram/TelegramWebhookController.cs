@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Pw.Hub.Relics.Api.Helpers;
 using Pw.Hub.Relics.Infrastructure.Data;
 using Telegram.Bot;
 using Telegram.Bot.Types;
@@ -9,6 +10,7 @@ namespace Pw.Hub.Relics.Api.Features.Telegram;
 
 [ApiController]
 [Route("api/telegram/webhook")]
+[ApiKeyAuth]
 public class TelegramWebhookController : ControllerBase
 {
     private readonly RelicsDbContext _dbContext;
@@ -29,6 +31,7 @@ public class TelegramWebhookController : ControllerBase
     /// Обрабатывает webhook от Telegram бота
     /// </summary>
     [HttpPost]
+    [SkipApiKeyAuth]
     public async Task<IActionResult> HandleWebhook(
         [FromBody] Update update,
         CancellationToken cancellationToken)

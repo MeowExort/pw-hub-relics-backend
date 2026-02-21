@@ -1,13 +1,13 @@
 using MediatR;
-using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Pw.Hub.Relics.Api.Features.PriceAnalytics.GetPriceTrends;
+using Pw.Hub.Relics.Api.Helpers;
 
 namespace Pw.Hub.Relics.Api.Features.PriceAnalytics;
 
 [ApiController]
 [Route("api/analytics")]
-[Authorize(Policy = "UserPolicy")]
+[ApiKeyAuth]
 public class PriceAnalyticsController : ControllerBase
 {
     private readonly IMediator _mediator;

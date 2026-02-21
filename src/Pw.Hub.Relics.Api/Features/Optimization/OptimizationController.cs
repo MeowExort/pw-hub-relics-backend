@@ -1,14 +1,14 @@
 using MediatR;
-using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Pw.Hub.Relics.Api.Features.Optimization.CalculateCheapestEnhancement;
 using Pw.Hub.Relics.Api.Features.Optimization.CalculateMostProfitableQuest;
+using Pw.Hub.Relics.Api.Helpers;
 
 namespace Pw.Hub.Relics.Api.Features.Optimization;
 
 [ApiController]
 [Route("api/optimization")]
-[Authorize(Policy = "UserPolicy")]
+[ApiKeyAuth]
 public class OptimizationController : ControllerBase
 {
     private readonly IMediator _mediator;

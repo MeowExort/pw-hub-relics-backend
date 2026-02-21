@@ -1,8 +1,8 @@
 using System.Security.Claims;
 using System.Security.Cryptography;
-using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Pw.Hub.Relics.Api.Helpers;
 using Pw.Hub.Relics.Domain.Entities;
 using Pw.Hub.Relics.Infrastructure.Data;
 using Telegram.Bot;
@@ -11,6 +11,7 @@ namespace Pw.Hub.Relics.Api.Features.Telegram;
 
 [ApiController]
 [Route("api/telegram")]
+[ApiKeyAuth]
 public class TelegramController : ControllerBase
 {
     private readonly RelicsDbContext _dbContext;
@@ -50,7 +51,6 @@ public class TelegramController : ControllerBase
     /// Генерирует deeplink ссылку для привязки Telegram аккаунта
     /// </summary>
     [HttpPost("binding/generate-link")]
-    [Authorize(Policy = "UserPolicy")]
     public async Task<IActionResult> GenerateBindingLink(CancellationToken cancellationToken)
     {
         var userId = GetUserId();
@@ -114,7 +114,6 @@ public class TelegramController : ControllerBase
     /// Получить статус привязки Telegram аккаунта
     /// </summary>
     [HttpGet("binding/status")]
-    [Authorize(Policy = "UserPolicy")]
     public async Task<IActionResult> GetBindingStatus(CancellationToken cancellationToken)
     {
         var userId = GetUserId();
@@ -144,7 +143,6 @@ public class TelegramController : ControllerBase
     /// Отвязать Telegram аккаунт
     /// </summary>
     [HttpDelete("binding")]
-    [Authorize(Policy = "UserPolicy")]
     public async Task<IActionResult> UnlinkTelegram(CancellationToken cancellationToken)
     {
         var userId = GetUserId();

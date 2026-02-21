@@ -1,16 +1,17 @@
 using MediatR;
-using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Pw.Hub.Relics.Api.BackgroundJobs;
 using Pw.Hub.Relics.Api.Features.Relics.CreateRelic;
 using Pw.Hub.Relics.Api.Features.Relics.GetRelicById;
 using Pw.Hub.Relics.Api.Features.Relics.ParseRelic;
 using Pw.Hub.Relics.Api.Features.Relics.SearchRelics;
+using Pw.Hub.Relics.Api.Helpers;
 
 namespace Pw.Hub.Relics.Api.Features.Relics;
-using Pw.Hub.Relics.Api.BackgroundJobs;
 
 [ApiController]
 [Route("api/relics")]
+[ApiKeyAuth]
 public class RelicsController : ControllerBase
 {
     private readonly IMediator _mediator;
@@ -27,10 +28,8 @@ public class RelicsController : ControllerBase
     /// </summary>
     /// <remarks>
     /// Бот НЕ знает relicDefinitionId - поиск по soulLevel+soulType+slotTypeId+race.
-    /// Требуется scope: relics:write
     /// </remarks>
     [HttpPost]
-    [Authorize(Policy = "BotPolicy")]
     public async Task<IActionResult> CreateRelic(
         [FromBody] CreateRelicCommand command,
         CancellationToken cancellationToken)
@@ -48,11 +47,7 @@ public class RelicsController : ControllerBase
     /// <summary>
     /// Поиск реликвий с фильтрацией
     /// </summary>
-    /// <remarks>
-    /// Требуется scope: relics:read
-    /// </remarks>
     [HttpGet("search")]
-    [Authorize(Policy = "UserPolicy")]
     public async Task<IActionResult> SearchRelics(
         [FromQuery] SearchRelicsQuery query,
         CancellationToken cancellationToken)
@@ -64,11 +59,7 @@ public class RelicsController : ControllerBase
     /// <summary>
     /// Получить реликвию по ID
     /// </summary>
-    /// <remarks>
-    /// Требуется scope: relics:read
-    /// </remarks>
     [HttpGet("{id:guid}")]
-    [Authorize(Policy = "UserPolicy")]
     public async Task<IActionResult> GetRelicById(
         Guid id,
         CancellationToken cancellationToken)
@@ -88,10 +79,9 @@ public class RelicsController : ControllerBase
     /// </summary>
     /// <remarks>
     /// Принимает бинарные данные пакета GetRelicDetail_Re и сохраняет лоты в БД.
-    /// Требуется scope: relics:write
     /// </remarks>
     [HttpPost("parse")]
-    [Authorize(Policy = "BotPolicy")]
+    [SkipApiKeyAuth]
     public async Task<IActionResult> ParseRelic(
         [FromBody] ParseRelicCommand command,
         CancellationToken cancellationToken)

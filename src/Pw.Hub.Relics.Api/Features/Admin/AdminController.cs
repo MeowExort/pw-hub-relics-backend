@@ -1,6 +1,6 @@
-using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Caching.Memory;
+using Pw.Hub.Relics.Api.Helpers;
 
 namespace Pw.Hub.Relics.Api.Features.Admin;
 
@@ -9,7 +9,7 @@ namespace Pw.Hub.Relics.Api.Features.Admin;
 /// </summary>
 [ApiController]
 [Route("api/admin")]
-[Authorize(Policy = "BotPolicy")]
+[ApiKeyAuth]
 public class AdminController : ControllerBase
 {
     private readonly IMemoryCache _cache;

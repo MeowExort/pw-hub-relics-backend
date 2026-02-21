@@ -1,11 +1,13 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Pw.Hub.Relics.Api.Helpers;
 using Pw.Hub.Relics.Infrastructure.Data;
 
 namespace Pw.Hub.Relics.Api.Features.Dictionaries;
 
 [ApiController]
 [Route("api/dictionaries")]
+[ApiKeyAuth]
 public class DictionariesController : ControllerBase
 {
     private readonly RelicsDbContext _dbContext;
