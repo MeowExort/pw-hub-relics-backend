@@ -1,8 +1,12 @@
+using Dapper;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
 using Pw.Hub.Relics.Domain.Enums;
 using Pw.Hub.Relics.Infrastructure.Data;
 using Pw.Hub.Relics.Shared.Helpers;
+using System.Text;
+using System.Text.Json;
+using DomainRelicAttributeDto = Pw.Hub.Relics.Domain.Entities.RelicAttributeDto;
 
 namespace Pw.Hub.Relics.Api.Features.Relics.SearchRelics;
 
@@ -17,177 +21,198 @@ public class SearchRelicsHandler : IRequestHandler<SearchRelicsQuery, SearchReli
 
     public async Task<SearchRelicsResponse> Handle(SearchRelicsQuery request, CancellationToken cancellationToken)
     {
-        // Ограничение размера страницы
         var pageSize = Math.Min(request.PageSize, 100);
         var pageNumber = Math.Max(request.PageNumber, 1);
+        
+        var connection = _dbContext.Database.GetDbConnection();
 
-        var query = _dbContext.RelicListings
-            .Include(r => r.RelicDefinition)
-                .ThenInclude(rd => rd.SlotType)
-            .Include(r => r.Server)
-            .Where(r => r.IsActive)
-            .AsNoTracking()
-            .AsQueryable();
+        var whereBuilder = new StringBuilder("WHERE rl.is_active = true");
+        var parameters = new DynamicParameters();
 
-        // Применение фильтров
         if (request.SoulType.HasValue)
         {
-            var soulType = (SoulType)request.SoulType.Value;
-            query = query.Where(r => r.RelicDefinition.SoulType == soulType);
+            whereBuilder.Append(" AND rd.soul_type = @SoulType");
+            parameters.Add("SoulType", request.SoulType.Value);
         }
 
         if (request.SlotTypeId.HasValue)
         {
-            query = query.Where(r => r.RelicDefinition.SlotTypeId == request.SlotTypeId.Value);
+            whereBuilder.Append(" AND rd.slot_type_id = @SlotTypeId");
+            parameters.Add("SlotTypeId", request.SlotTypeId.Value);
         }
 
         if (request.Race.HasValue)
         {
-            var race = (Race)request.Race.Value;
-            query = query.Where(r => r.RelicDefinition.Race == race);
+            whereBuilder.Append(" AND rd.race = @Race");
+            parameters.Add("Race", request.Race.Value);
         }
 
         if (request.SoulLevel.HasValue)
         {
-            query = query.Where(r => r.RelicDefinition.SoulLevel == request.SoulLevel.Value);
+            whereBuilder.Append(" AND rd.soul_level = @SoulLevel");
+            parameters.Add("SoulLevel", request.SoulLevel.Value);
         }
 
         if (request.MainAttributeId.HasValue)
         {
-            var mainAttrId = request.MainAttributeId.Value;
-            query = query.Where(r => r.JsonAttributes.Any(a => 
-                (int)a.Category == (int)AttributeCategory.Main && 
-                a.AttributeDefinitionId == mainAttrId));
+            // Поиск по JSONB массиву для MainAttribute
+            whereBuilder.Append(" AND rl.json_attributes @> @MainAttrJson::jsonb");
+            var mainAttrJson = JsonSerializer.Serialize(new[] 
+            { 
+                new { AttributeDefinitionId = request.MainAttributeId.Value, Category = (int)AttributeCategory.Main } 
+            });
+            parameters.Add("MainAttrJson", mainAttrJson);
         }
 
         if (request.AdditionalAttributes is { Count: > 0 })
         {
-            foreach (var attr in request.AdditionalAttributes)
+            for (int i = 0; i < request.AdditionalAttributes.Count; i++)
             {
-                var attrId = attr.Id;
-                var attrMinValue = attr.MinValue;
-                query = query.Where(r => r.JsonAttributes.Any(a => 
-                    (int)a.Category == (int)AttributeCategory.Additional && 
-                    a.AttributeDefinitionId == attrId &&
-                    (!attrMinValue.HasValue || a.Value >= attrMinValue.Value)));
+                var attr = request.AdditionalAttributes[i];
+                var pId = $"AttrId_{i}";
+                var pMin = $"AttrMin_{i}";
+                
+                // Используем jsonb_to_recordset для поиска значения
+                whereBuilder.Append($@" AND EXISTS (
+                    SELECT 1 
+                    FROM jsonb_to_recordset(rl.json_attributes) as x(""AttributeDefinitionId"" int, ""Value"" int, ""Category"" int) 
+                    WHERE x.""AttributeDefinitionId"" = @{pId} 
+                      AND x.""Category"" = {(int)AttributeCategory.Additional} 
+                      AND (@{pMin} IS NULL OR x.""Value"" >= @{pMin})
+                )");
+                
+                parameters.Add(pId, attr.Id);
+                parameters.Add(pMin, attr.MinValue);
             }
         }
 
         if (request.MinPrice.HasValue)
         {
-            query = query.Where(r => r.Price >= request.MinPrice.Value);
+            whereBuilder.Append(" AND rl.price >= @MinPrice");
+            parameters.Add("MinPrice", request.MinPrice.Value);
         }
 
         if (request.MaxPrice.HasValue)
         {
-            query = query.Where(r => r.Price <= request.MaxPrice.Value);
+            whereBuilder.Append(" AND rl.price <= @MaxPrice");
+            parameters.Add("MaxPrice", request.MaxPrice.Value);
         }
 
         if (request.ServerId.HasValue)
         {
-            query = query.Where(r => r.ServerId == request.ServerId.Value);
+            whereBuilder.Append(" AND rl.server_id = @ServerId");
+            parameters.Add("ServerId", request.ServerId.Value);
         }
 
         if (request.MinEnhancementLevel.HasValue)
         {
-            query = query.Where(r => r.EnhancementLevel >= request.MinEnhancementLevel.Value);
+            whereBuilder.Append(" AND rl.enhancement_level >= @MinEnhancementLevel");
+            parameters.Add("MinEnhancementLevel", request.MinEnhancementLevel.Value);
         }
 
         if (request.MaxEnhancementLevel.HasValue)
         {
-            query = query.Where(r => r.EnhancementLevel <= request.MaxEnhancementLevel.Value);
+            whereBuilder.Append(" AND rl.enhancement_level <= @MaxEnhancementLevel");
+            parameters.Add("MaxEnhancementLevel", request.MaxEnhancementLevel.Value);
         }
 
         if (request.MinAbsorbExperience.HasValue)
         {
-            query = query.Where(r => r.AbsorbExperience >= request.MinAbsorbExperience.Value);
+            whereBuilder.Append(" AND rl.absorb_experience >= @MinAbsorbExperience");
+            parameters.Add("MinAbsorbExperience", request.MinAbsorbExperience.Value);
         }
 
         if (request.MaxAbsorbExperience.HasValue)
         {
-            query = query.Where(r => r.AbsorbExperience <= request.MaxAbsorbExperience.Value);
+            whereBuilder.Append(" AND rl.absorb_experience <= @MaxAbsorbExperience");
+            parameters.Add("MaxAbsorbExperience", request.MaxAbsorbExperience.Value);
         }
 
         // Подсчет общего количества
-        var totalCount = await query.CountAsync(cancellationToken);
+        var countSql = $@"
+            SELECT COUNT(*) 
+            FROM relic_listings rl
+            JOIN relic_definitions rd ON rl.relic_definition_id = rd.id
+            {whereBuilder}";
 
-        // Пагинация и сортировка
-        var sortDirection = request.SortDirection?.ToLower() == "asc" ? "asc" : "desc";
+        var totalCount = await connection.ExecuteScalarAsync<int>(countSql, parameters);
+
+        // Сортировка
+        var sortBuilder = new StringBuilder();
+        var sortDirection = request.SortDirection?.ToLower() == "asc" ? "ASC" : "DESC";
         var sortBy = request.SortBy?.ToLower();
-
-        IOrderedQueryable<Domain.Entities.RelicListing> orderedQuery;
 
         if (sortBy == "price")
         {
-            orderedQuery = sortDirection == "asc" 
-                ? query.OrderBy(r => r.Price) 
-                : query.OrderByDescending(r => r.Price);
+            sortBuilder.Append($"ORDER BY rl.price {sortDirection}");
         }
         else if (sortBy == "enhancementlevel")
         {
-            orderedQuery = sortDirection == "asc" 
-                ? query.OrderBy(r => r.EnhancementLevel).ThenByDescending(r => r.Price) 
-                : query.OrderByDescending(r => r.EnhancementLevel).ThenByDescending(r => r.Price);
+            sortBuilder.Append($"ORDER BY rl.enhancement_level {sortDirection}, rl.price DESC");
         }
         else if (sortBy == "attributevalue" && request.SortAttributeId.HasValue)
         {
-            var sortAttrId = request.SortAttributeId.Value;
-            var additionalCategory = (int)AttributeCategory.Additional;
-            if (sortDirection == "asc")
-            {
-                orderedQuery = query.OrderBy(r => r.JsonAttributes
-                        .Where(a => (int)a.Category == additionalCategory && a.AttributeDefinitionId == sortAttrId)
-                        .Select(a => (int?)a.Value)
-                        .FirstOrDefault() ?? 0)
-                    .ThenByDescending(r => r.Price);
-            }
-            else
-            {
-                orderedQuery = query.OrderByDescending(r => r.JsonAttributes
-                        .Where(a => (int)a.Category == additionalCategory && a.AttributeDefinitionId == sortAttrId)
-                        .Select(a => (int?)a.Value)
-                        .FirstOrDefault() ?? 0)
-                    .ThenByDescending(r => r.Price);
-            }
+            sortBuilder.Append($@"ORDER BY (
+                SELECT (x.""Value"")::int 
+                FROM jsonb_to_recordset(rl.json_attributes) as x(""AttributeDefinitionId"" int, ""Value"" int, ""Category"" int)
+                WHERE x.""AttributeDefinitionId"" = @SortAttributeId AND x.""Category"" = {(int)AttributeCategory.Additional}
+                LIMIT 1
+            ) {sortDirection}, rl.price DESC");
+            parameters.Add("SortAttributeId", request.SortAttributeId.Value);
         }
         else
         {
-            // По умолчанию сортировка по CreatedAt (как было)
-            // Но в требовании сказано: "По умолчанию вторым параметром сортировки должна быть цена."
-            // А основным по умолчанию оставим CreatedAt, если не указано иное.
-            orderedQuery = query.OrderByDescending(r => r.CreatedAt).ThenByDescending(r => r.Price);
+            sortBuilder.Append("ORDER BY rl.created_at DESC, rl.price DESC");
         }
 
-        var items = await orderedQuery
-            .Skip((pageNumber - 1) * pageSize)
-            .Take(pageSize)
-            .ToListAsync(cancellationToken);
+        // Основной запрос
+        var sql = $@"
+            SELECT 
+                rl.id, rl.relic_definition_id, rl.absorb_experience, rl.json_attributes::text as JsonAttributesRaw, 
+                rl.enhancement_level, rl.price, rl.server_id, rl.created_at,
+                rd.id as RelicId, rd.name as RelicName, rd.soul_level as RelicSoulLevel, rd.soul_type as RelicSoulType, rd.race as RelicRace, rd.icon_uri as RelicIconUri,
+                st.id as SlotTypeId, st.name as SlotTypeName,
+                sd.id as ServerId, sd.name as ServerName, sd.key as ServerKey
+            FROM relic_listings rl
+            JOIN relic_definitions rd ON rl.relic_definition_id = rd.id
+            JOIN slot_types st ON rd.slot_type_id = st.id
+            JOIN server_definitions sd ON rl.server_id = sd.id
+            {whereBuilder}
+            {sortBuilder}
+            OFFSET @Offset LIMIT @Limit";
 
-        // Предварительная загрузка всех определений атрибутов для маппинга
+        parameters.Add("Offset", (pageNumber - 1) * pageSize);
+        parameters.Add("Limit", pageSize);
+
+        var rawItems = await connection.QueryAsync<dynamic>(sql, parameters);
+
+        // Загрузка определений атрибутов (можно закэшировать, но пока так)
         var attrDefs = await _dbContext.AttributeDefinitions
             .AsNoTracking()
             .ToDictionaryAsync(ad => ad.Id, ad => ad.Name, cancellationToken);
 
-        // Маппинг в DTO
-        var itemDtos = items.Select(r =>
-        {
-            var mainAttr = r.JsonAttributes.FirstOrDefault(a => a.Category == AttributeCategory.Main);
-            var additionalAttrs = r.JsonAttributes.Where(a => a.Category == AttributeCategory.Additional).ToList();
+        var itemDtos = new List<RelicListingDto>();
 
-            return new RelicListingDto
+        foreach (var row in rawItems)
+        {
+            var jsonAttributes = JsonSerializer.Deserialize<List<DomainRelicAttributeDto>>((string)row.JsonAttributesRaw) ?? new List<DomainRelicAttributeDto>();
+            var mainAttr = jsonAttributes.FirstOrDefault(a => a.Category == AttributeCategory.Main);
+            var additionalAttrs = jsonAttributes.Where(a => a.Category == AttributeCategory.Additional).ToList();
+
+            itemDtos.Add(new RelicListingDto
             {
-                Id = r.Id,
+                Id = row.id,
                 RelicDefinition = new RelicDefinitionDto
                 {
-                    Id = r.RelicDefinition.Id,
-                    Name = r.RelicDefinition.Name,
-                    SoulLevel = r.RelicDefinition.SoulLevel,
-                    SoulType = (int)r.RelicDefinition.SoulType,
-                    SlotType = new SlotTypeDto(r.RelicDefinition.SlotType.Id, r.RelicDefinition.SlotType.Name),
-                    Race = (int)r.RelicDefinition.Race,
-                    IconUri = r.RelicDefinition.IconUri
+                    Id = row.RelicId,
+                    Name = row.RelicName,
+                    SoulLevel = row.RelicSoulLevel,
+                    SoulType = row.RelicSoulType,
+                    SlotType = new SlotTypeDto(row.SlotTypeId, row.SlotTypeName),
+                    Race = row.RelicRace,
+                    IconUri = row.RelicIconUri
                 },
-                AbsorbExperience = r.AbsorbExperience,
+                AbsorbExperience = row.absorb_experience,
                 MainAttribute = mainAttr != null
                     ? new RelicAttributeDto
                     {
@@ -208,13 +233,13 @@ public class SearchRelicsHandler : IRequestHandler<SearchRelicsQuery, SearchReli
                         attrDefs.GetValueOrDefault(a.AttributeDefinitionId, "Unknown")),
                     Value = a.Value
                 }).ToList(),
-                EnhancementLevel = r.EnhancementLevel,
-                Price = r.Price,
-                PriceFormatted = PriceHelper.FormatPrice(r.Price),
-                Server = new ServerDto(r.Server.Id, r.Server.Name, r.Server.Key),
-                CreatedAt = r.CreatedAt
-            };
-        }).ToList();
+                EnhancementLevel = row.enhancement_level,
+                Price = row.price,
+                PriceFormatted = PriceHelper.FormatPrice(row.price),
+                Server = new ServerDto(row.ServerId, row.ServerName, row.ServerKey),
+                CreatedAt = row.created_at
+            });
+        }
 
         return new SearchRelicsResponse
         {

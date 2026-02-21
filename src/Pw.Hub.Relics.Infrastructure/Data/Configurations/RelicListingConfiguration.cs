@@ -112,5 +112,10 @@ public class RelicListingConfiguration : IEntityTypeConfiguration<RelicListing>
         // Index for optimized lookup by attributes hash
         builder.HasIndex(x => new { x.ServerId, x.SellerCharacterId, x.ShopPosition, x.AttributesHash })
             .HasDatabaseName("IX_RelicListings_Lookup");
+
+        // GIN index for JSON attributes
+        builder.HasIndex(x => x.JsonAttributes)
+            .HasDatabaseName("IX_RelicListings_JsonAttributes")
+            .HasMethod("gin");
     }
 }
