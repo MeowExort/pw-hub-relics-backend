@@ -14,6 +14,11 @@ using Pw.Hub.Relics.Domain.Enums;
 namespace Pw.Hub.Relics.Api.BackgroundJobs;
 
 /// <summary>
+/// Результат UPSERT операции с информацией о том, была ли запись вставлена или обновлена
+/// </summary>
+public record UpsertResult(Guid Id, bool IsInsert);
+
+/// <summary>
 /// Фоновый сервис для пакетной обработки парсинга реликвий с использованием PostgreSQL UPSERT
 /// </summary>
 public class ParseRelicBackgroundService : BackgroundService
@@ -21,15 +26,18 @@ public class ParseRelicBackgroundService : BackgroundService
     private readonly IParseRelicQueue _queue;
     private readonly IServiceProvider _serviceProvider;
     private readonly ILogger<ParseRelicBackgroundService> _logger;
+    private readonly INotificationProcessor _notificationProcessor;
 
     public ParseRelicBackgroundService(
         IParseRelicQueue queue,
         IServiceProvider serviceProvider,
-        ILogger<ParseRelicBackgroundService> logger)
+        ILogger<ParseRelicBackgroundService> logger,
+        INotificationProcessor notificationProcessor)
     {
         _queue = queue;
         _serviceProvider = serviceProvider;
         _logger = logger;
+        _notificationProcessor = notificationProcessor;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -121,14 +129,37 @@ public class ParseRelicBackgroundService : BackgroundService
                 .ToList();
 
             const int sqlBatchSize = 100;
+            var allNewListingIds = new HashSet<Guid>();
+            
             for (int i = 0; i < uniqueListings.Count; i += sqlBatchSize)
             {
                 var currentBatch = uniqueListings.Skip(i).Take(sqlBatchSize).ToList();
-                await ExecuteUpsertSqlAsync(dbContext, currentBatch, ct);
+                var upsertResults = await ExecuteUpsertSqlWithReturningAsync(dbContext, currentBatch, ct);
                 
-                // В данном случае мы не знаем точно сколько было создано, а сколько обновлено через ExecuteSqlRawAsync
-                // Поэтому помечаем их как 'processed'
-                RelicMetrics.RelicsProcessedTotal.WithLabels("processed").Inc(currentBatch.Count);
+                // Собираем ID новых записей (где xmax = 0, т.е. INSERT)
+                var newIds = upsertResults.Where(r => r.IsInsert).Select(r => r.Id).ToHashSet();
+                foreach (var id in newIds)
+                {
+                    allNewListingIds.Add(id);
+                }
+                
+                var insertedCount = upsertResults.Count(r => r.IsInsert);
+                var updatedCount = upsertResults.Count(r => !r.IsInsert);
+                
+                RelicMetrics.RelicsProcessedTotal.WithLabels("created").Inc((double)insertedCount);
+                RelicMetrics.RelicsProcessedTotal.WithLabels("updated").Inc((double)updatedCount);
+            }
+            
+            // Отправляем уведомления только для новых записей
+            if (allNewListingIds.Count > 0)
+            {
+                var newListings = uniqueListings.Where(l => allNewListingIds.Contains(l.Id)).ToList();
+                _logger.LogInformation("Processing notifications for {Count} new listings", newListings.Count);
+                
+                foreach (var listing in newListings)
+                {
+                    await _notificationProcessor.ProcessNewListingAsync(listing, ct);
+                }
             }
         }
         catch (Exception ex)
@@ -193,7 +224,11 @@ public class ParseRelicBackgroundService : BackgroundService
         return result;
     }
 
-    private async Task ExecuteUpsertSqlAsync(RelicsDbContext dbContext, List<RelicListing> listings, CancellationToken ct)
+    /// <summary>
+    /// Выполняет UPSERT с RETURNING для определения новых записей через xmax.
+    /// В PostgreSQL xmax = 0 означает INSERT, xmax != 0 означает UPDATE.
+    /// </summary>
+    private async Task<List<UpsertResult>> ExecuteUpsertSqlWithReturningAsync(RelicsDbContext dbContext, List<RelicListing> listings, CancellationToken ct)
     {
         var sql = new StringBuilder();
         sql.AppendLine("INSERT INTO relic_listings (id, relic_definition_id, absorb_experience, enhancement_level, seller_character_id, shop_position, price, server_id, created_at, last_seen_at, is_active, attributes_hash, json_attributes)");
@@ -231,9 +266,34 @@ public class ParseRelicBackgroundService : BackgroundService
         sql.AppendLine("  last_seen_at = EXCLUDED.last_seen_at,");
         sql.AppendLine("  is_active = EXCLUDED.is_active,");
         sql.AppendLine("  attributes_hash = EXCLUDED.attributes_hash,");
-        sql.AppendLine("  json_attributes = EXCLUDED.json_attributes;");
+        sql.AppendLine("  json_attributes = EXCLUDED.json_attributes");
+        sql.AppendLine("RETURNING id, (xmax = 0) AS is_insert;");
 
-        await dbContext.Database.ExecuteSqlRawAsync(sql.ToString(), parameters, ct);
+        var results = new List<UpsertResult>();
+        
+        using var connection = dbContext.Database.GetDbConnection();
+        await connection.OpenAsync(ct);
+        
+        using var command = connection.CreateCommand();
+        command.CommandText = sql.ToString();
+        
+        for (int i = 0; i < parameters.Count; i++)
+        {
+            var param = command.CreateParameter();
+            param.ParameterName = $"@p{i}";
+            param.Value = parameters[i];
+            command.Parameters.Add(param);
+        }
+        
+        using var reader = await command.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            var id = reader.GetGuid(0);
+            var isInsert = reader.GetBoolean(1);
+            results.Add(new UpsertResult(id, isInsert));
+        }
+        
+        return results;
     }
 
     private int GetAbsorbExperience(Relic lotRelicItem, RelicDefinition relicDefinition)
