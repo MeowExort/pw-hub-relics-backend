@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using System.Security.Cryptography;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Pw.Hub.Relics.Api.Helpers;
@@ -13,6 +14,7 @@ namespace Pw.Hub.Relics.Api.Features.Telegram;
 [ApiController]
 [Route("api/telegram")]
 [ApiKeyAuth]
+[Authorize]
 public class TelegramController : ControllerBase
 {
     private readonly RelicsDbContext _dbContext;
