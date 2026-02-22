@@ -224,12 +224,12 @@ public class NotificationProcessorService : INotificationProcessor
             message.AppendLine($"📊 {EscapeHtml(attrName)}: {mainAttr.Value}");
         }
 
-        // Разделительная линия
-        message.AppendLine("───────────────");
-
         // Дополнительные характеристики
         if (additionalAttrs.Count > 0)
         {
+
+            // Разделительная линия
+            message.AppendLine("───────────────");
             foreach (var attr in additionalAttrs)
             {
                 var attrName = attributeDefinitions.TryGetValue(attr.AttributeDefinitionId, out var name) 
