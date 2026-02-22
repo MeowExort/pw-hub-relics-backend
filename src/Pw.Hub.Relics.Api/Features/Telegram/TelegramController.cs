@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Pw.Hub.Relics.Api.Helpers;
 using Pw.Hub.Relics.Domain.Entities;
+using Pw.Hub.Relics.Domain.Enums;
 using Pw.Hub.Relics.Infrastructure.Data;
 using Telegram.Bot;
 
@@ -193,6 +194,145 @@ public class TelegramController : ControllerBase
             .Replace("/", "_")
             .Replace("=", "");
     }
+
+    // ===== Настройки уведомлений =====
+
+    /// <summary>
+    /// Получить настройки уведомлений
+    /// </summary>
+    [HttpGet("notifications/settings")]
+    public async Task<IActionResult> GetNotificationSettings(CancellationToken cancellationToken)
+    {
+        var userId = GetUserId();
+
+        var binding = await _dbContext.TelegramBindings
+            .FirstOrDefaultAsync(b => b.UserId == userId, cancellationToken);
+
+        if (binding == null || !binding.IsConfirmed)
+        {
+            return NotFound(new { error = "Telegram account is not linked" });
+        }
+
+        return Ok(new NotificationSettingsResponse
+        {
+            Frequency = binding.NotificationFrequency,
+            QuietHoursEnabled = binding.QuietHoursEnabled,
+            QuietHoursStart = binding.QuietHoursStart?.ToString("HH:mm"),
+            QuietHoursEnd = binding.QuietHoursEnd?.ToString("HH:mm")
+        });
+    }
+
+    /// <summary>
+    /// Обновить настройки уведомлений
+    /// </summary>
+    [HttpPut("notifications/settings")]
+    public async Task<IActionResult> UpdateNotificationSettings(
+        [FromBody] UpdateNotificationSettingsRequest request,
+        CancellationToken cancellationToken)
+    {
+        var userId = GetUserId();
+
+        var binding = await _dbContext.TelegramBindings
+            .FirstOrDefaultAsync(b => b.UserId == userId, cancellationToken);
+
+        if (binding == null || !binding.IsConfirmed)
+        {
+            return NotFound(new { error = "Telegram account is not linked" });
+        }
+
+        // Обновляем частоту уведомлений
+        if (request.Frequency.HasValue)
+        {
+            binding.NotificationFrequency = request.Frequency.Value;
+        }
+
+        // Обновляем настройки тихих часов
+        if (request.QuietHoursEnabled.HasValue)
+        {
+            binding.QuietHoursEnabled = request.QuietHoursEnabled.Value;
+        }
+
+        if (request.QuietHoursStart != null)
+        {
+            if (TimeOnly.TryParse((string)request.QuietHoursStart, out var startTime))
+            {
+                binding.QuietHoursStart = startTime;
+            }
+            else
+            {
+                return BadRequest(new { error = "Invalid QuietHoursStart format. Use HH:mm" });
+            }
+        }
+
+        if (request.QuietHoursEnd != null)
+        {
+            if (TimeOnly.TryParse((string)request.QuietHoursEnd, out var endTime))
+            {
+                binding.QuietHoursEnd = endTime;
+            }
+            else
+            {
+                return BadRequest(new { error = "Invalid QuietHoursEnd format. Use HH:mm" });
+            }
+        }
+
+        binding.UpdatedAt = DateTime.UtcNow;
+        await _dbContext.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation("User {UserId} updated notification settings", userId);
+
+        return Ok(new NotificationSettingsResponse
+        {
+            Frequency = binding.NotificationFrequency,
+            QuietHoursEnabled = binding.QuietHoursEnabled,
+            QuietHoursStart = binding.QuietHoursStart?.ToString("HH:mm"),
+            QuietHoursEnd = binding.QuietHoursEnd?.ToString("HH:mm")
+        });
+    }
+
+    /// <summary>
+    /// Отправить тестовое уведомление для проверки связи
+    /// </summary>
+    [HttpPost("notifications/test")]
+    public async Task<IActionResult> SendTestNotification(CancellationToken cancellationToken)
+    {
+        var userId = GetUserId();
+
+        var binding = await _dbContext.TelegramBindings
+            .FirstOrDefaultAsync(b => b.UserId == userId, cancellationToken);
+
+        if (binding == null || !binding.IsConfirmed)
+        {
+            return NotFound(new { error = "Telegram account is not linked" });
+        }
+
+        if (binding.TelegramChatId == null)
+        {
+            return BadRequest(new { error = "Telegram chat ID is not set" });
+        }
+
+        if (_telegramBotClient == null)
+        {
+            return StatusCode(500, new { error = "Telegram bot is not configured" });
+        }
+
+        try
+        {
+            await _telegramBotClient.SendMessage(
+                chatId: binding.TelegramChatId.Value,
+                text: "✅ Тестовое уведомление\n\nЕсли вы видите это сообщение, значит уведомления работают корректно!",
+                cancellationToken: cancellationToken);
+
+            _logger.LogInformation("Test notification sent to user {UserId}", userId);
+
+            return Ok(new { success = true, message = "Test notification sent successfully" });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to send test notification to user {UserId}", userId);
+            return StatusCode(500, new { error = "Failed to send test notification", details = ex.Message });
+        }
+    }
 }
 
 public class GenerateBindingLinkResponse
@@ -206,4 +346,35 @@ public class BindingStatusResponse
     public bool IsLinked { get; init; }
     public string? TelegramUsername { get; init; }
     public DateTime? LinkedAt { get; init; }
+}
+
+public class NotificationSettingsResponse
+{
+    public NotificationFrequency Frequency { get; init; }
+    public bool QuietHoursEnabled { get; init; }
+    public string? QuietHoursStart { get; init; }
+    public string? QuietHoursEnd { get; init; }
+}
+
+public class UpdateNotificationSettingsRequest
+{
+    /// <summary>
+    /// Частота уведомлений: Instant (0), Hourly (1), Daily (2)
+    /// </summary>
+    public NotificationFrequency? Frequency { get; init; }
+    
+    /// <summary>
+    /// Включить/выключить тихие часы
+    /// </summary>
+    public bool? QuietHoursEnabled { get; init; }
+    
+    /// <summary>
+    /// Начало тихих часов в формате HH:mm (UTC)
+    /// </summary>
+    public string? QuietHoursStart { get; init; }
+    
+    /// <summary>
+    /// Конец тихих часов в формате HH:mm (UTC)
+    /// </summary>
+    public string? QuietHoursEnd { get; init; }
 }

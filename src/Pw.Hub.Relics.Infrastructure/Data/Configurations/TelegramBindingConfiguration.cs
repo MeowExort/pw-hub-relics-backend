@@ -52,6 +52,23 @@ public class TelegramBindingConfiguration : IEntityTypeConfiguration<TelegramBin
             .HasDefaultValueSql("NOW()")
             .IsRequired();
 
+        // Notification settings
+        builder.Property(x => x.NotificationFrequency)
+            .HasColumnName("notification_frequency")
+            .HasDefaultValue(Domain.Enums.NotificationFrequency.Instant)
+            .IsRequired();
+
+        builder.Property(x => x.QuietHoursEnabled)
+            .HasColumnName("quiet_hours_enabled")
+            .HasDefaultValue(false)
+            .IsRequired();
+
+        builder.Property(x => x.QuietHoursStart)
+            .HasColumnName("quiet_hours_start");
+
+        builder.Property(x => x.QuietHoursEnd)
+            .HasColumnName("quiet_hours_end");
+
         // Indexes
         builder.HasIndex(x => x.UserId).IsUnique();
         builder.HasIndex(x => x.LinkToken).IsUnique();

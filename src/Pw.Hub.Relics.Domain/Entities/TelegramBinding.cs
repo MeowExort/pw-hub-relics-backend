@@ -1,3 +1,5 @@
+using Pw.Hub.Relics.Domain.Enums;
+
 namespace Pw.Hub.Relics.Domain.Entities;
 
 /// <summary>
@@ -46,4 +48,26 @@ public class TelegramBinding
     /// Дата последнего обновления
     /// </summary>
     public DateTime UpdatedAt { get; set; }
+    
+    // ===== Настройки уведомлений =====
+    
+    /// <summary>
+    /// Частота отправки уведомлений
+    /// </summary>
+    public NotificationFrequency NotificationFrequency { get; set; } = NotificationFrequency.Instant;
+    
+    /// <summary>
+    /// Включены ли "тихие часы"
+    /// </summary>
+    public bool QuietHoursEnabled { get; set; } = false;
+    
+    /// <summary>
+    /// Начало "тихих часов" (время в формате HH:mm, UTC)
+    /// </summary>
+    public TimeOnly? QuietHoursStart { get; set; }
+    
+    /// <summary>
+    /// Конец "тихих часов" (время в формате HH:mm, UTC)
+    /// </summary>
+    public TimeOnly? QuietHoursEnd { get; set; }
 }
