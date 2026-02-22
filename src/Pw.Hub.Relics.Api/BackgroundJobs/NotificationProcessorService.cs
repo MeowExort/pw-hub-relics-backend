@@ -217,6 +217,7 @@ public class NotificationProcessorService : INotificationProcessor
         if (mainAttr != null)
         {
             message.AppendLine();
+            message.AppendLine("Характеристики:");
             var attrName = attributeDefinitions.TryGetValue(mainAttr.AttributeDefinitionId, out var name) 
                 ? name 
                 : $"ID {mainAttr.AttributeDefinitionId}";
@@ -237,12 +238,13 @@ public class NotificationProcessorService : INotificationProcessor
                 message.AppendLine($"📈 {EscapeHtml(attrName)}: {attr.Value}");
             }
         }
-
+        
         // Бейджи фильтров
         var badges = BuildFilterBadges(filter);
         if (!string.IsNullOrEmpty(badges))
         {
             message.AppendLine();
+            message.AppendLine("Фильтры:");
             message.AppendLine(badges);
         }
 
