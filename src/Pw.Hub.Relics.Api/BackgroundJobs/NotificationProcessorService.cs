@@ -126,8 +126,6 @@ public class NotificationProcessorService : INotificationProcessor
         RelicListing listing, 
         CancellationToken cancellationToken)
     {
-        var message = BuildNotificationMessage(listing);
-        
         _logger.LogInformation(
             "Resolving chat for user {UserId} for listing {ListingId}",
             filter.UserId,
@@ -148,11 +146,32 @@ public class NotificationProcessorService : INotificationProcessor
 
                 if (binding?.TelegramChatId is long chatId)
                 {
-                    await _telegramBotClient.SendMessage(
-                        chatId: chatId,
-                        text: message,
-                        parseMode: Telegram.Bot.Types.Enums.ParseMode.Html,
-                        cancellationToken: cancellationToken);
+                    // Загружаем справочник атрибутов для отображения названий
+                    var attributeDefinitions = await dbContext.AttributeDefinitions
+                        .ToDictionaryAsync(a => a.Id, a => a.Name, cancellationToken);
+                    
+                    var message = BuildNotificationMessage(listing, filter, attributeDefinitions);
+                    var iconUri = listing.RelicDefinition?.IconUri;
+                    
+                    if (!string.IsNullOrEmpty(iconUri))
+                    {
+                        // Отправляем сообщение с иконкой
+                        await _telegramBotClient.SendPhoto(
+                            chatId: chatId,
+                            photo: Telegram.Bot.Types.InputFile.FromUri(iconUri),
+                            caption: message,
+                            parseMode: Telegram.Bot.Types.Enums.ParseMode.Html,
+                            cancellationToken: cancellationToken);
+                    }
+                    else
+                    {
+                        // Отправляем текстовое сообщение без иконки
+                        await _telegramBotClient.SendMessage(
+                            chatId: chatId,
+                            text: message,
+                            parseMode: Telegram.Bot.Types.Enums.ParseMode.Html,
+                            cancellationToken: cancellationToken);
+                    }
 
                     _logger.LogDebug("Notification sent successfully to chat {ChatId}", chatId);
                 }
@@ -170,38 +189,100 @@ public class NotificationProcessorService : INotificationProcessor
         }
         else
         {
-            _logger.LogWarning("Telegram bot client is not configured. Message: {Message}", message);
+            _logger.LogWarning("Telegram bot client is not configured. Filter: {FilterName}", filter.Name);
         }
     }
 
-    private string BuildNotificationMessage(RelicListing listing)
+    private string BuildNotificationMessage(
+        RelicListing listing, 
+        NotificationFilter filter,
+        Dictionary<int, string> attributeDefinitions)
     {
         var mainAttr = listing.JsonAttributes.FirstOrDefault(a => a.Category == AttributeCategory.Main);
         var additionalAttrs = listing.JsonAttributes.Where(a => a.Category == AttributeCategory.Additional).ToList();
 
         var message = new StringBuilder();
-        message.AppendLine("🔔 Новая реликвия!");
+        
+        // Название уведомления (фильтра)
+        message.AppendLine($"🔔 <b>{EscapeHtml(filter.Name)}</b>");
         message.AppendLine();
-        message.AppendLine($"📦 {listing.RelicDefinition.Name}");
+        
+        // Информация о реликвии
+        message.AppendLine($"📦 {EscapeHtml(listing.RelicDefinition?.Name ?? "Неизвестная реликвия")}");
         message.AppendLine($"💰 Цена: {PriceHelper.FormatPrice(listing.Price)}");
         message.AppendLine($"⚡ Заточка: +{listing.EnhancementLevel}");
         message.AppendLine($"🔮 Опыт: {listing.AbsorbExperience}");
 
+        // Основная характеристика
         if (mainAttr != null)
         {
             message.AppendLine();
-            message.AppendLine($"📊 Основная: ID {mainAttr.AttributeDefinitionId} = {mainAttr.Value}");
+            var attrName = attributeDefinitions.TryGetValue(mainAttr.AttributeDefinitionId, out var name) 
+                ? name 
+                : $"ID {mainAttr.AttributeDefinitionId}";
+            message.AppendLine($"📊 {EscapeHtml(attrName)}: {mainAttr.Value}");
         }
 
+        // Разделительная линия
+        message.AppendLine("───────────────");
+
+        // Дополнительные характеристики
         if (additionalAttrs.Count > 0)
         {
-            message.AppendLine("📈 Дополнительные:");
             foreach (var attr in additionalAttrs)
             {
-                message.AppendLine($"  • ID {attr.AttributeDefinitionId} = {attr.Value}");
+                var attrName = attributeDefinitions.TryGetValue(attr.AttributeDefinitionId, out var name) 
+                    ? name 
+                    : $"ID {attr.AttributeDefinitionId}";
+                message.AppendLine($"📈 {EscapeHtml(attrName)}: {attr.Value}");
             }
         }
 
+        // Бейджи фильтров
+        var badges = BuildFilterBadges(filter);
+        if (!string.IsNullOrEmpty(badges))
+        {
+            message.AppendLine();
+            message.AppendLine(badges);
+        }
+
         return message.ToString();
+    }
+
+    private string BuildFilterBadges(NotificationFilter filter)
+    {
+        var badges = new List<string>();
+
+        if (filter.SoulType.HasValue)
+            badges.Add($"🏷 {filter.SoulType.Value}");
+
+        if (filter.SoulLevel.HasValue)
+            badges.Add($"⭐ Ур.{filter.SoulLevel.Value}");
+
+        if (filter.Race.HasValue)
+            badges.Add($"👤 {filter.Race.Value}");
+
+        if (filter.MinPrice.HasValue || filter.MaxPrice.HasValue)
+        {
+            var priceRange = (filter.MinPrice.HasValue, filter.MaxPrice.HasValue) switch
+            {
+                (true, true) => $"💵 {PriceHelper.FormatPrice(filter.MinPrice.Value)}-{PriceHelper.FormatPrice(filter.MaxPrice.Value)}",
+                (true, false) => $"💵 от {PriceHelper.FormatPrice(filter.MinPrice.Value)}",
+                (false, true) => $"💵 до {PriceHelper.FormatPrice(filter.MaxPrice.Value)}",
+                _ => null
+            };
+            if (priceRange != null)
+                badges.Add(priceRange);
+        }
+
+        return badges.Count > 0 ? string.Join(" | ", badges) : string.Empty;
+    }
+
+    private static string EscapeHtml(string text)
+    {
+        return text
+            .Replace("&", "&amp;")
+            .Replace("<", "&lt;")
+            .Replace(">", "&gt;");
     }
 }
