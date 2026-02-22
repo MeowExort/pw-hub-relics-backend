@@ -248,6 +248,10 @@ public class NotificationProcessorService : INotificationProcessor
             message.AppendLine(badges);
         }
 
+        // Ссылка на реликвию
+        message.AppendLine();
+        message.AppendLine($"🔗 <a href=\"https://relics.pw-hub.ru/relics/{listing.Id}\">Открыть на сайте</a>");
+
         return message.ToString();
     }
 
