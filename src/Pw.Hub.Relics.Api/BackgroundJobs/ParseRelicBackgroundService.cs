@@ -271,8 +271,11 @@ public class ParseRelicBackgroundService : BackgroundService
 
         var results = new List<UpsertResult>();
         
-        using var connection = dbContext.Database.GetDbConnection();
-        await connection.OpenAsync(ct);
+        var connection = dbContext.Database.GetDbConnection();
+        if (connection.State != System.Data.ConnectionState.Open)
+        {
+            await connection.OpenAsync(ct);
+        }
         
         using var command = connection.CreateCommand();
         command.CommandText = sql.ToString();
